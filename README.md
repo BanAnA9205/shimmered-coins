@@ -15,13 +15,14 @@ Early MVP. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
 - [x] Move graph: buy / sell / craft / shimmer, with NPC happiness pricing and world conditions
 - [x] Reference search engine (Python): tree over move sequences, per-sequence LP for quantities, branch-and-bound, exact integer plans
 - [x] Extractor for real game data (reads `TerrariaServer.exe`), see [`extractor/README.md`](extractor/README.md). Tested against a mock game assembly; waiting on a real build.
-- [ ] C++ search core
+- [x] C++ search core (`pip install ./cpp`): same algorithm with a dedicated simplex solver and OpenMP, used automatically when installed, parity-tested against the Python engine
 - [x] Web UI (local, Terraria-style): `shimcoins serve`
 
 # Quick start
 
 ```sh
 pip install -e ".[dev]"
+pip install ./cpp          # optional C++ core, ~1000x faster per search node
 pytest
 
 # search the bundled toy world (invented data)

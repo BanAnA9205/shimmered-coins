@@ -25,8 +25,10 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..model.graph import BUY, SELL, Graph, Transform, format_coins
+from . import native
 from .bounds import Bounds, compute_bounds
 from .lp import SequenceLp
+from .native import native_search
 from .quantize import IntegerPlan, quantize
 
 LEFTOVER_POLICIES = ("discard", "sell")
@@ -46,6 +48,8 @@ class SearchParams:
     budget: int | None = None  # copper; scale the integer plan up to this
     max_nodes: int = 500_000
     time_limit: float | None = 60.0
+    backend: str = "auto"  # "python", "native" (C++ core) or "auto" (native when installed)
+    threads: int = 0  # native backend: OpenMP threads (0 = all cores)
 
 
 @dataclass
@@ -135,6 +139,18 @@ class _Downstream:
 
 def search(g: Graph, params: SearchParams = SearchParams()) -> SearchReport:
     w = leftover_weights(g, params.leftover)
+    if params.backend not in ("auto", "python", "native"):
+        raise ValueError(f"unknown backend {params.backend!r}")
+    use_native = params.backend == "native" or (
+        params.backend == "auto" and native.available() and not params.allow_loss
+    )
+    if use_native:
+        if params.allow_loss:
+            raise ValueError("allow_loss is only supported by the python backend")
+        ranked, stats = native_search(g, params, w)
+        results = [_finalize(g, seq, gain, x, w, params.budget) for gain, seq, x in ranked]
+        results.sort(key=lambda r: r.gain, reverse=True)
+        return SearchReport(results, stats)
     bounds = compute_bounds(g, params.max_steps, w)
     stats = SearchStats()
     downstream = _Downstream(g)
