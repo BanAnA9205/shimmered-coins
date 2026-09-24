@@ -25,7 +25,11 @@ pip install -e ".[dev]"
 pip install ./cpp          # optional C++ core, ~1000x faster per search node
 pytest
 
-# search the bundled toy world (invented data)
+# get real game data: download the (free) dedicated server, extract, build the db
+shimcoins data fetch           # picks a version, confirms, cleans up after itself
+shimcoins search data/1.4.5.8 --all-npcs 1 --flag hardmode --max-steps 5
+
+# or search the bundled toy world (invented data)
 shimcoins search python/shimmered_coins/demo/toy_world.json --all-npcs 1 --flag downedBoss --max-steps 5
 ```
 

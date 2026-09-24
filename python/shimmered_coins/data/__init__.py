@@ -1,4 +1,4 @@
-from .curate import apply_overrides, diff, load_dataset
+from .curate import apply_overrides, build_db, diff, load_dataset
 from .schema import Dataset, Ingredient, Item, Npc, Recipe, RecipeGroup, ShimmerRule, ShopEntry
 
 __all__ = [
@@ -11,6 +11,7 @@ __all__ = [
     "ShimmerRule",
     "ShopEntry",
     "apply_overrides",
+    "build_db",
     "diff",
     "load_dataset",
 ]

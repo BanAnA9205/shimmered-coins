@@ -6,6 +6,7 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+.vscode/
 
 # Extracted game data stays local (never commit Re-Logic data/assets)
 /data/

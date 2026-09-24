@@ -127,7 +127,7 @@ pyproject.toml, CMakeLists.txt, .github/workflows/ci.yml
 
 ## 7. Milestones
 
-**Status (2026-09-24):** milestones 1 and 3–5 are done. Milestone 2 is done against a mock game assembly and is waiting on a real `TerrariaServer.exe` run.
+**Status (2026-09-24):** milestones 1 and 3–5 are done. Milestone 2 is done against a mock game assembly; `shimcoins data fetch` now downloads a real server zip from terraria.org, runs the extractor and cleans up, but it has not been run against a real build yet (needs Mono on the machine).
 
 Differences from the original plan:
 - The search is a DFS branch-and-bound, not beam search.
