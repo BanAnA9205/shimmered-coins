@@ -48,18 +48,40 @@ For a complete small example, see `python/shimmered_coins/demo/toy_world.json`. 
 
 ## Conditions
 
-Conditions are strings. `"x"` holds when world flag `x` is set, and `"!x"` holds when it is not.
-A list of conditions means all of them must hold. The extractor chooses the flag names, and the
-UI and CLI pass them as `--flag`. Suggested names:
+Conditions are strings. Prefix one with `!` to negate it. A list of conditions means all of them
+must hold. When a shop item is available in several alternative situations (for example, "moon
+phase 2 or 6"), the extractor writes one shop entry per alternative.
 
-| flag | meaning |
-|------|---------|
-| `hardmode` | Wall of Flesh defeated |
-| `downed<Boss>` | e.g. `downedMoonLord`, `downedPlantBoss` (mirrors the game's `NPC.downed*` fields) |
-| `crimson` / `corruption` | world evil |
-| `night`, `bloodMoon`, `eclipse` | time and events |
-| `moon:<phase>` | moon phase, e.g. `moon:full` |
-| `biome:<name>` | the NPC's current biome, for shops that depend on it |
+The prefix decides what a condition is checked against:
+
+| form | scope | checked against |
+|------|-------|-----------------|
+| `zone:<biome>` (`zone:snow`, `zone:desert`, `zone:surface`, …) | `zone` | the zones of the **NPC selling the item**. This is where you stand when you talk to it. |
+| `happy<=<adj>` | `happiness` | that NPC's happiness price adjustment (pylons) |
+| `npc:<id>` | `npc_present` | whether that NPC lives in town |
+| `need:<thing>` | `craft_location` | crafting next to water, in snow, … These are assumed reachable. |
+| `player:<slug>` | `player` | player state no probe could explain (golf score, bestiary %, …). This is a flag and off by default. |
+| anything else (`hardmode`, `downedmoonlord`, `daytime`, `moon:3`, `bloodmoon`, `crimson`, `mode:expert`, seeds, …) | `world` | the world flags you set |
+
+Matching is case-insensitive.
+
+### Condition catalog
+
+The optional `conditions` array describes each condition name (without `!`):
+
+```jsonc
+"conditions": [
+  {"name": "zone:snow", "scope": "zone", "description": "In Snow", "depends": ["zone:snow"]},
+  {"name": "happy<=0.9", "scope": "happiness", "description": "When the NPC is happy", "depends": ["happy"]}
+]
+```
+
+The extractor builds this catalog by probing. For each game `Condition`, and for every item of a
+pre-1.4.4 hard-coded shop, it changes one piece of game state at a time and records what changes
+the result. For conditions that are still false, it also tries changing two pieces at once. The
+state it changes: progression, time, moon phase, events, seeds, difficulty, the player's biome
+zones, which other NPCs are present, and happiness. The UI uses the catalog to group flags and to
+list the biomes an NPC can live in.
 
 ## Curation overrides
 

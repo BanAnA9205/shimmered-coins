@@ -52,20 +52,36 @@ ShimmerTransforms, NPCShopDatabase, Condition, ...), which is what's needed to a
 
 ## How conditions are found
 
-- **Shimmer rules and pre-1.4.4 shops:** the extractor sets `Main.hardMode`, every `NPC.downed*` flag and
-  `WorldGen.crimson` to different values, calls the game's own functions each time, and records which
-  flags change the result. Flag names are the game's field names in lowercase, for example
-  `downedmoonlord` and `downedboss3`.
-- **1.4.4+ shops:** entries carry `Condition` objects. These are named after the `Terraria.Condition`
-  static field they match, lowercased, for example `hardmode` or `!bloodmoon`.
-- **Pricing:** `pricing_probe` in the metadata stores samples of the game's `GetItemExpectedPrice` at
-  different happiness levels. `shimcoins data info` compares them with the engine's formula.
+The extractor **probes**. It changes one piece of game state at a time and watches which items
+appear, or whether a `Condition` holds. The state it changes:
+
+- progression (`hardMode`, every `NPC.downed*`)
+- time and moon phase
+- events and seeds
+- difficulty
+- the player's biome zones
+- which other town NPCs are present
+- the NPC's happiness
+
+This works the same way on 1.4.4+ `Condition` objects and on pre-1.4.4 hard-coded
+`Chest.SetupShop` code. It produces typed conditions such as `zone:snow`, `!daytime`, `moon:2`,
+`npc:22` and `happy<=0.9`. See [`../docs/DATA_FORMAT.md`](../docs/DATA_FORMAT.md) for the full
+grammar. Anything no probe explains becomes a `player:<slug>` flag, for example a golf score or
+bestiary completion.
+
+- **Shimmer rules:** the extractor changes the progression flags and world evil, and records which
+  flags change the result.
+- **Pricing:** `pricing_probe` in the metadata stores samples of the game's `GetItemExpectedPrice`
+  at different happiness levels. `shimcoins data info` compares them with the engine's formula.
+
+`--legacy-shops` forces the pre-1.4.4 shop path, which is useful for debugging.
 
 ## Known gaps
 
-- The Travelling Merchant's random stock isn't extracted.
+- The Travelling Merchant's random stock isn't extracted. Enter today's stock with `--travel-stock` or in the UI.
 - Pre-1.4.4 shops use an approximate shop-index → NPC table, and prices set inside `SetupShop` aren't captured.
-- Biome, moon-phase and time-of-day shop conditions only appear as `Condition` names (1.4.4+).
-  Pass them as `--flag` when relevant.
+- Probing finds conditions that depend on one or two pieces of state. `if/else` biome chains
+  (e.g. "desert but not snow") come out as just `zone:desert`. That only matters if you put an NPC
+  in two biomes at once.
 
 The extracted data belongs to Re-Logic. Keep it local; `/data/` is gitignored.

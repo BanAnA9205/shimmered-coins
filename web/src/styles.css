@@ -203,6 +203,7 @@ input[type="range"] {
 }
 
 .check input {
+  flex: none;
   width: 18px;
   height: 18px;
   accent-color: var(--yellow);
@@ -256,6 +257,12 @@ input[type="range"] {
   flex-direction: column;
   gap: 2px;
   padding-left: 24px;
+}
+
+.npc-zone {
+  margin-top: 4px;
+  padding: 3px 6px;
+  font-size: 0.85rem;
 }
 
 .npc-adj {

@@ -14,7 +14,13 @@ export interface DatasetInfo {
   recipes: number;
   shimmer_rules: number;
   npcs: { id: number; name: string }[];
-  flags: string[];
+  flag_groups: Record<string, { name: string; description: string }[]>;
+  zones: string[];
+}
+
+export interface NpcIn {
+  adjustment: number;
+  zones: string[] | "any";
 }
 
 export interface ItemRef {
@@ -63,7 +69,8 @@ export interface SearchRequest {
   flags: string[];
   shimmer: boolean;
   discount: boolean;
-  npcs: Record<number, number>;
+  npcs: Record<number, NpcIn>;
+  travel_stock: number[];
   kinds: Kind[];
   include: number[] | null;
   exclude: number[];

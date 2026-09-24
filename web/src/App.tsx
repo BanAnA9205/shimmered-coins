@@ -5,6 +5,7 @@ import {
   type DatasetSummary,
   type ItemRef,
   type Kind,
+  type NpcIn,
   type SearchResponse,
 } from "./api";
 import { ItemPicker } from "./components/ItemPicker";
@@ -17,7 +18,8 @@ interface Settings {
   flags: string[];
   shimmer: boolean;
   discount: boolean;
-  npcs: Record<number, number>; // present NPC -> price adjustment
+  npcs: Record<number, NpcIn>; // present NPC -> happiness price adjustment + biome
+  travel: ItemRef[];
   kinds: Kind[];
   maxSteps: number;
   topN: number;
@@ -36,6 +38,7 @@ const DEFAULTS: Settings = {
   shimmer: true,
   discount: false,
   npcs: {},
+  travel: [],
   kinds: ALL_KINDS,
   maxSteps: 4,
   topN: 10,
@@ -48,12 +51,30 @@ const DEFAULTS: Settings = {
   start: [],
 };
 
+const GROUP_LABEL: Record<string, string> = {
+  progression: "Progression",
+  time: "Time & moon",
+  events: "Events",
+  seeds: "Seeds & difficulty",
+  player: "Player",
+  other: "Other",
+};
+
+const NEUTRAL: NpcIn = { adjustment: 1, zones: [] };
+
 const STORAGE_KEY = "shimmered-coins.settings.v1";
 
 function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = { ...DEFAULTS, ...JSON.parse(raw) } as Settings;
+      // settings saved before NPC biomes existed stored a bare adjustment per NPC
+      for (const [id, v] of Object.entries(saved.npcs as Record<string, unknown>)) {
+        if (typeof v === "number") saved.npcs[+id] = { adjustment: v, zones: [] };
+      }
+      return saved;
+    }
   } catch {
     /* storage unavailable */
   }
@@ -101,8 +122,9 @@ export default function App() {
           const known = d.npcs.filter((n) => n.id in o.npcs);
           const npcs = known.length
             ? Object.fromEntries(known.map((n) => [n.id, o.npcs[n.id]]))
-            : Object.fromEntries(d.npcs.map((n) => [n.id, 1]));
-          return { ...o, npcs, flags: o.flags.filter((f) => d.flags.includes(f)) };
+            : Object.fromEntries(d.npcs.map((n) => [n.id, NEUTRAL]));
+          const known_flags = Object.values(d.flag_groups).flatMap((g) => g.map((f) => f.name));
+          return { ...o, npcs, flags: o.flags.filter((f) => known_flags.includes(f)) };
         });
       },
       (e) => setError(String(e.message ?? e)),
@@ -121,6 +143,7 @@ export default function App() {
         shimmer: s.shimmer,
         discount: s.discount,
         npcs: s.npcs,
+        travel_stock: s.travel.map((i) => i.id),
         kinds: s.kinds,
         include: s.include.length ? s.include.map((i) => i.id) : null,
         exclude: s.exclude.map((i) => i.id),
@@ -173,23 +196,24 @@ export default function App() {
                 {info.items} items · {info.recipes} recipes · {info.shimmer_rules} shimmer rules
               </p>
             )}
-            {info && info.flags.length > 0 && (
-              <>
-                <label className="field-label">Progression &amp; world</label>
-                <div className="flag-grid">
-                  {info.flags.map((f) => (
-                    <label key={f} className="check">
-                      <input
-                        type="checkbox"
-                        checked={s.flags.includes(f)}
-                        onChange={() => set("flags", toggle(s.flags, f))}
-                      />
-                      <span>{f}</span>
-                    </label>
-                  ))}
+            {info &&
+              Object.entries(info.flag_groups).map(([group, flags]) => (
+                <div key={group}>
+                  <label className="field-label">{GROUP_LABEL[group] ?? group}</label>
+                  <div className="flag-grid">
+                    {flags.map((f) => (
+                      <label key={f.name} className="check" title={f.name}>
+                        <input
+                          type="checkbox"
+                          checked={s.flags.includes(f.name)}
+                          onChange={() => set("flags", toggle(s.flags, f.name))}
+                        />
+                        <span>{f.description}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </>
-            )}
+              ))}
             <label className="check">
               <input
                 type="checkbox"
@@ -217,7 +241,10 @@ export default function App() {
             </p>
             {info?.npcs.map((n) => {
               const present = n.id in s.npcs;
-              const adj = s.npcs[n.id] ?? 1;
+              const npc = s.npcs[n.id] ?? NEUTRAL;
+              const update = (patch: Partial<NpcIn>) =>
+                set("npcs", { ...s.npcs, [n.id]: { ...npc, ...patch } });
+              const zoneValue = npc.zones === "any" ? "any" : (npc.zones[0] ?? "");
               return (
                 <div key={n.id} className={`npc ${present ? "" : "absent"}`}>
                   <label className="check">
@@ -227,7 +254,7 @@ export default function App() {
                       onChange={() => {
                         const next = { ...s.npcs };
                         if (present) delete next[n.id];
-                        else next[n.id] = 1;
+                        else next[n.id] = NEUTRAL;
                         set("npcs", next);
                       }}
                     />
@@ -240,17 +267,45 @@ export default function App() {
                         min={0.75}
                         max={1.5}
                         step={0.01}
-                        value={adj}
-                        onChange={(e) => set("npcs", { ...s.npcs, [n.id]: +e.target.value })}
+                        value={npc.adjustment}
+                        onChange={(e) => update({ adjustment: +e.target.value })}
                       />
                       <span className="npc-adj" title="shop price adjustment">
-                        ×{adj.toFixed(2)} · {mood(adj)}
+                        ×{npc.adjustment.toFixed(2)} · {mood(npc.adjustment)}
                       </span>
+                      {info.zones.length > 0 && (
+                        <select
+                          className="t-input npc-zone"
+                          title="where the NPC lives: biome-specific stock depends on it"
+                          value={zoneValue}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            update({ zones: v === "any" ? "any" : v ? [v] : [] });
+                          }}
+                        >
+                          <option value="">no special biome</option>
+                          {info.zones.map((z) => (
+                            <option key={z} value={z}>
+                              lives in {z}
+                            </option>
+                          ))}
+                          <option value="any">anywhere (what-if)</option>
+                        </select>
+                      )}
                     </div>
                   )}
                 </div>
               );
             })}
+            {info && (
+              <ItemPicker
+                dataset={s.dataset}
+                label="Travelling Merchant sells today"
+                hint="his stock is random, so enter what he has"
+                value={s.travel}
+                onChange={(v) => set("travel", v)}
+              />
+            )}
           </section>
         </aside>
 
