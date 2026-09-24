@@ -126,6 +126,12 @@ pyproject.toml, CMakeLists.txt, .github/workflows/ci.yml
 ```
 
 ## 7. Milestones
+
+**Status (2026-09-24):** milestones 1 and 3–5 are done. Milestone 2 is done against a mock game assembly and is waiting on a real `TerrariaServer.exe` run.
+
+Differences from the original plan:
+- The search is a DFS branch-and-bound, not beam search.
+- Negative-gain reporting (`allow_loss`) is Python-only.
 1. Scaffolding: pyproject, CMake, CI (pytest, ruff, clang-format), and a toy-graph fixture.
 2. Extractor and DB build for 1.4.5.8 (current) and 1.4.4.9, plus `data diff`. After that, add the 1.4.0–1.4.3 adapter.
 3. Model and pricing, with the Python reference search and CLI (`shimcoins search --max-steps 4 ...`).
