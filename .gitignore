@@ -13,3 +13,5 @@ dist/
 !/web/public/fonts/README.md
 /web/public/sprites/
 node_modules/
+/web/dist/
+*.tsbuildinfo

@@ -16,7 +16,7 @@ Early MVP. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
 - [x] Reference search engine (Python): tree over move sequences, per-sequence LP for quantities, branch-and-bound, exact integer plans
 - [x] Extractor for real game data (reads `TerrariaServer.exe`), see [`extractor/README.md`](extractor/README.md). Tested against a mock game assembly; waiting on a real build.
 - [ ] C++ search core
-- [ ] Web UI
+- [x] Web UI (local, Terraria-style): `shimcoins serve`
 
 # Quick start
 
@@ -25,8 +25,21 @@ pip install -e ".[dev]"
 pytest
 
 # search the bundled toy world (invented data)
-shimcoins search tests/fixtures/toy_world.json --all-npcs 1 --flag downedBoss --max-steps 5
+shimcoins search python/shimmered_coins/demo/toy_world.json --all-npcs 1 --flag downedBoss --max-steps 5
 ```
+
+## Web UI
+
+```sh
+pip install -e ".[api]"
+(cd web && npm install && npm run build)
+shimcoins serve            # http://127.0.0.1:8765, datasets from ./data (plus the demo world)
+```
+
+For UI development, run `npm run dev` inside `web/` while `shimcoins serve` is running. The dev server proxies `/api` to it.
+
+- **Font:** put a Terraria-style font at `web/public/fonts/terraria.ttf`. It's gitignored and used automatically.
+- **Item sprites:** `web/public/sprites/Item_<id>.png`, also gitignored.
 
 ## How the search works
 

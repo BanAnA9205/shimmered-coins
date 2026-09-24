@@ -4,7 +4,7 @@ The extractor reads one Terraria build and writes a single JSON document. `shimc
 turns it into `data/<version>/db.sqlite`, which is the curated store the engine loads.
 Extracted data is **never committed**: `/data/` is gitignored.
 
-For a complete small example, see `tests/fixtures/toy_world.json`. Its names and numbers are invented.
+For a complete small example, see `python/shimmered_coins/demo/toy_world.json`. Its names and numbers are invented.
 
 ```jsonc
 {

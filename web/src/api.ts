@@ -1,0 +1,104 @@
+export type Kind = "buy" | "sell" | "craft" | "shimmer";
+
+export interface DatasetSummary {
+  id: string;
+  version?: string;
+  items?: number;
+  error?: string;
+}
+
+export interface DatasetInfo {
+  id: string;
+  version: string;
+  items: number;
+  recipes: number;
+  shimmer_rules: number;
+  npcs: { id: number; name: string }[];
+  flags: string[];
+}
+
+export interface ItemRef {
+  id: number;
+  name: string;
+  value?: number;
+}
+
+export interface Stack {
+  id: number;
+  name: string;
+  count: number;
+}
+
+export interface MoveOut {
+  kind: Kind;
+  batches: number;
+  text: string;
+  inputs: Stack[];
+  outputs: Stack[];
+  cost: number;
+  revenue: number;
+  npc: string | null;
+  limited: boolean;
+}
+
+export interface ResultOut {
+  gain: number;
+  lp_gain: number;
+  capital: number;
+  profit: number;
+  repeatable: boolean;
+  moves: MoveOut[];
+  leftover: Stack[];
+}
+
+export interface SearchResponse {
+  version: string;
+  moves_available: number;
+  stats: { nodes: number; lp_solves: number; pruned: number; elapsed: number; complete: boolean };
+  results: ResultOut[];
+}
+
+export interface SearchRequest {
+  dataset: string;
+  flags: string[];
+  shimmer: boolean;
+  discount: boolean;
+  npcs: Record<number, number>;
+  kinds: Kind[];
+  include: number[] | null;
+  exclude: number[];
+  must_use: number[];
+  start: number[] | null;
+  max_steps: number;
+  top_n: number;
+  leftover: "discard" | "sell";
+  allow_loss: boolean;
+  time_limit: number;
+}
+
+async function call<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {
+      /* not json */
+    }
+    throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  datasets: () => call<DatasetSummary[]>("/api/datasets"),
+  dataset: (id: string) => call<DatasetInfo>(`/api/datasets/${encodeURIComponent(id)}`),
+  items: (id: string, q: string) =>
+    call<ItemRef[]>(`/api/datasets/${encodeURIComponent(id)}/items?q=${encodeURIComponent(q)}`),
+  search: (req: SearchRequest) =>
+    call<SearchResponse>("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }),
+};

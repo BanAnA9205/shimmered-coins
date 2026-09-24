@@ -1,0 +1,551 @@
+/* Terraria-style theme. Drop a font into public/fonts/ (see README there) to use it. */
+@font-face {
+  font-family: "TerrariaLocal";
+  src:
+    url("/fonts/terraria.woff2") format("woff2"),
+    url("/fonts/terraria.ttf") format("truetype"),
+    url("/fonts/terraria.otf") format("opentype");
+  font-display: swap;
+}
+
+:root {
+  --font: "TerrariaLocal", "Andy", "Comic Neue", "Comic Sans MS", system-ui, sans-serif;
+  --sky-top: #0d1640;
+  --sky-bottom: #26347a;
+  --panel: rgba(35, 46, 116, 0.86);
+  --panel-edge: rgba(12, 16, 52, 0.95);
+  --panel-glow: rgba(120, 140, 230, 0.45);
+  --slot: rgba(63, 82, 151, 0.9);
+  --slot-edge: rgba(18, 24, 70, 0.95);
+  --slot-hover: rgba(92, 112, 196, 0.95);
+  --text: #ffffff;
+  --muted: #b9c3ef;
+  --yellow: #ffe45c;
+  --green: #7dff6b;
+  --red: #ff6b6b;
+  --platinum: #dcdcf5;
+  --gold: #f2d15c;
+  --silver: #c8d1d6;
+  --copper: #f5935f;
+  --buy: #5fb4ff;
+  --craft: #ffb84d;
+  --shimmer: #e6a3ff;
+  --sell: #7dff6b;
+  --outline:
+    -2px -2px 0 #000, 0 -2px 0 #000, 2px -2px 0 #000, 2px 0 0 #000, 2px 2px 0 #000,
+    0 2px 0 #000, -2px 2px 0 #000, -2px 0 0 #000;
+  --outline-thin:
+    -1px -1px 0 #000, 1px -1px 0 #000, 1px 1px 0 #000, -1px 1px 0 #000;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  font-weight: 700;
+  color: var(--text);
+  text-shadow: var(--outline-thin);
+  background:
+    radial-gradient(2px 2px at 12% 18%, #fff8 50%, transparent 51%),
+    radial-gradient(2px 2px at 37% 8%, #fff6 50%, transparent 51%),
+    radial-gradient(2px 2px at 64% 22%, #fff7 50%, transparent 51%),
+    radial-gradient(2px 2px at 83% 12%, #fff5 50%, transparent 51%),
+    radial-gradient(2px 2px at 91% 35%, #fff6 50%, transparent 51%),
+    radial-gradient(2px 2px at 22% 40%, #fff4 50%, transparent 51%),
+    linear-gradient(var(--sky-top), var(--sky-bottom)) fixed;
+  background-color: var(--sky-top);
+}
+
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* ---- title -------------------------------------------------------------------------------- */
+.title {
+  text-align: center;
+  margin: 8px 0 20px;
+}
+
+.title h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  letter-spacing: 1px;
+  color: var(--yellow);
+  text-shadow:
+    var(--outline),
+    0 0 18px rgba(230, 163, 255, 0.55);
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 1.35rem;
+  color: var(--yellow);
+  text-shadow: var(--outline);
+}
+
+/* ---- layout -------------------------------------------------------------------------------- */
+.layout {
+  display: grid;
+  grid-template-columns: 330px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.sidebar,
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- panels (inventory-style) -------------------------------------------------------------- */
+.panel {
+  background: var(--panel);
+  border: 3px solid var(--panel-edge);
+  border-radius: 10px;
+  box-shadow:
+    inset 0 0 0 2px var(--panel-glow),
+    0 6px 18px rgba(0, 0, 0, 0.35);
+  padding: 14px 16px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 4px 0 8px;
+}
+
+.warn {
+  color: #ffb3b3;
+}
+
+.field-label {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.row > .field-label {
+  margin: 0;
+}
+
+.field {
+  min-width: 140px;
+}
+
+/* ---- inputs -------------------------------------------------------------------------------- */
+.t-input {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  text-shadow: var(--outline-thin);
+  background: var(--slot);
+  border: 2px solid var(--slot-edge);
+  border-radius: 6px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.t-input:focus {
+  background: var(--slot-hover);
+}
+
+.t-input.small {
+  width: 90px;
+}
+
+select.t-input option {
+  background: #26347a;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--yellow);
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  margin: 3px 0;
+}
+
+.check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--yellow);
+}
+
+.flag-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0 8px;
+  margin-bottom: 8px;
+}
+
+/* Terraria menu buttons: plain outlined text that turns yellow and grows on hover */
+.t-button {
+  display: block;
+  margin: 14px auto 2px;
+  font: inherit;
+  font-size: 1.7rem;
+  color: var(--text);
+  text-shadow: var(--outline);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition:
+    transform 0.08s,
+    color 0.08s;
+}
+
+.t-button:hover:not(:disabled) {
+  color: var(--yellow);
+  transform: scale(1.12);
+}
+
+.t-button:disabled {
+  color: #8a93b8;
+  cursor: default;
+}
+
+/* ---- NPCs --------------------------------------------------------------------------------- */
+.npc {
+  padding: 6px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.npc.absent {
+  opacity: 0.6;
+}
+
+.npc-happy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 24px;
+}
+
+.npc-adj {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* ---- item pickers ------------------------------------------------------------------------- */
+.constraints {
+  margin: 8px 0;
+}
+
+.constraints summary {
+  cursor: pointer;
+  color: var(--yellow);
+}
+
+.pickers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 16px;
+}
+
+.picker {
+  position: relative;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.chip {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  text-shadow: var(--outline-thin);
+  background: var(--slot-hover);
+  border: 2px solid var(--slot-edge);
+  border-radius: 12px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.picker-hits {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 4px;
+  background: rgba(20, 27, 80, 0.97);
+  border: 2px solid var(--slot-edge);
+  border-radius: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.picker-hits button {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  text-shadow: var(--outline-thin);
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.picker-hits button:hover {
+  color: var(--yellow);
+}
+
+/* ---- coins -------------------------------------------------------------------------------- */
+.coins {
+  display: inline-flex;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.coin-platinum {
+  color: var(--platinum);
+}
+.coin-gold {
+  color: var(--gold);
+}
+.coin-silver {
+  color: var(--silver);
+}
+.coin-copper {
+  color: var(--copper);
+}
+.coin-neg {
+  color: var(--red);
+}
+
+/* ---- item slots --------------------------------------------------------------------------- */
+.slot {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  background: var(--slot);
+  border: 2px solid var(--slot-edge);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(160, 180, 255, 0.25);
+}
+
+.slot:hover {
+  background: var(--slot-hover);
+}
+
+.slot-sprite {
+  max-width: 40px;
+  max-height: 40px;
+  image-rendering: pixelated;
+}
+
+.slot-initials {
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.slot-count {
+  position: absolute;
+  left: 5px;
+  bottom: 1px;
+  font-size: 0.85rem;
+  text-shadow: var(--outline-thin);
+}
+
+/* ---- results ------------------------------------------------------------------------------ */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stats {
+  margin: 0;
+}
+
+.empty {
+  color: var(--muted);
+}
+
+.result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  margin-bottom: 10px;
+}
+
+.rank {
+  color: var(--muted);
+}
+
+.gain {
+  font-size: 1.8rem;
+  text-shadow: var(--outline);
+}
+
+.gain.pos {
+  color: var(--green);
+}
+
+.gain.neg {
+  color: var(--red);
+}
+
+.result-meta {
+  color: var(--muted);
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.step {
+  background: rgba(15, 20, 60, 0.45);
+  border: 2px solid var(--panel-edge);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.step-num {
+  color: var(--muted);
+}
+
+.step-npc {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.step-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.step-text {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  max-width: 320px;
+}
+
+.arrow {
+  color: var(--yellow);
+  font-size: 1.2rem;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 2px solid rgba(0, 0, 0, 0.6);
+  font-size: 0.85rem;
+  text-transform: capitalize;
+  color: #fff;
+}
+
+.badge-buy {
+  background: rgba(95, 180, 255, 0.35);
+  color: var(--buy);
+}
+.badge-craft {
+  background: rgba(255, 184, 77, 0.3);
+  color: var(--craft);
+}
+.badge-sell {
+  background: rgba(125, 255, 107, 0.25);
+  color: var(--sell);
+}
+.badge-loop {
+  background: rgba(255, 228, 92, 0.2);
+  color: var(--yellow);
+}
+
+/* shimmer gets the aether's shifting pink/violet/cyan */
+.badge-shimmer {
+  color: #fff;
+  background: linear-gradient(90deg, #ff9de6, #b18cff, #8cf0ff, #ff9de6);
+  background-size: 300% 100%;
+  animation: shimmer 3s linear infinite;
+}
+
+.step-shimmer {
+  border-color: rgba(214, 150, 255, 0.7);
+  box-shadow: 0 0 10px rgba(214, 150, 255, 0.35);
+}
+
+@keyframes shimmer {
+  to {
+    background-position: 300% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-shimmer {
+    animation: none;
+  }
+}
+
+.leftover {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.leftover .field-label {
+  margin: 0 6px 0 0;
+}

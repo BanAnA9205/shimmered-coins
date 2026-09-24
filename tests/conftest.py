@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "python"))
 from shimmered_coins.data import load_dataset  # noqa: E402
 from shimmered_coins.model import NpcSetup, WorldConfig, build_graph  # noqa: E402
 
-TOY = ROOT / "tests" / "fixtures" / "toy_world.json"
+TOY = ROOT / "python" / "shimmered_coins" / "demo" / "toy_world.json"
 
 
 @pytest.fixture

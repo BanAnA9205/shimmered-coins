@@ -167,6 +167,21 @@ def cmd_search(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(a: argparse.Namespace) -> int:
+    import os
+
+    try:
+        import uvicorn
+    except ImportError:
+        print("the web UI needs extra packages: pip install -e '.[api]'", file=sys.stderr)
+        return 2
+    if a.data:
+        os.environ["SHIMCOINS_DATA"] = a.data
+    print(f"shimmered-coins UI on http://{a.host}:{a.port}")
+    uvicorn.run("shimmered_coins.api.app:app", host=a.host, port=a.port, log_level="warning")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="shimcoins", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -214,6 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--time-limit", type=float, default=60.0)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_search)
+
+    v = sub.add_parser("serve", help="run the web UI + API")
+    v.add_argument("--host", default="127.0.0.1")
+    v.add_argument("--port", type=int, default=8765)
+    v.add_argument("--data", help="dataset directory (default ./data or $SHIMCOINS_DATA)")
+    v.set_defaults(func=cmd_serve)
     return p
 
 
