@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Extracted game data stays local (never commit Re-Logic data/assets)
+/data/
+/web/public/fonts/*
+!/web/public/fonts/README.md
+/web/public/sprites/
+node_modules/
