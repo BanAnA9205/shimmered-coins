@@ -14,7 +14,7 @@ Early MVP. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
 - [x] Dataset schema, SQLite storage, curation overrides, version diff ([`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md))
 - [x] Move graph: buy / sell / craft / shimmer, with NPC happiness pricing and world conditions
 - [x] Reference search engine (Python): tree over move sequences, per-sequence LP for quantities, branch-and-bound, exact integer plans
-- [ ] Extractor for real game data (reads `TerrariaServer.exe`)
+- [x] Extractor for real game data (reads `TerrariaServer.exe`), see [`extractor/README.md`](extractor/README.md). Tested against a mock game assembly; waiting on a real build.
 - [ ] C++ search core
 - [ ] Web UI
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from .data import apply_overrides, diff, load_dataset
 from .data import db as dbmod
 from .data.schema import Dataset
-from .model import KINDS, Constraints, NpcSetup, WorldConfig, build_graph
+from .model import KINDS, Constraints, NpcSetup, WorldConfig, build_graph, check_pricing
 from .search import SearchParams, search
 
 _COIN_RE = re.compile(r"(\d+)\s*([pgsc])", re.I)
@@ -67,13 +67,14 @@ def cmd_data_info(a: argparse.Namespace) -> int:
         json.dumps(
             {
                 "version": ds.version,
-                "meta": ds.meta,
+                "meta": {k: v for k, v in ds.meta.items() if k != "pricing_probe"},
                 "items": len(ds.items),
                 "recipes": len(ds.recipes),
                 "groups": len(ds.groups),
                 "shops": len(ds.shops),
                 "shimmer": len(ds.shimmer),
                 "npcs": [n.name for n in ds.npcs.values()],
+                "pricing_check": check_pricing(ds.meta.get("pricing_probe", [])),
             },
             indent=2,
         )
