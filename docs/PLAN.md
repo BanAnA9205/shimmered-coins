@@ -105,7 +105,7 @@ Stack decisions:
 - **Web** (`web/`, React + TS + Vite):
   - **Styling:** custom Terraria-style CSS, meaning blue translucent inventory-slot panels, 9-slice `border-image` frames and pixel-perfect scaling.
   - **UI kit:** starts from **RPGUI** (zlib licence) or **NES.css** (MIT) for components.
-  - **Font:** the font slot is pluggable. The repo ships a free OFL pixel font as the default. `web/public/fonts/` is gitignored, so you can drop in the Terraria font from dafontstyle, or Andy from your own game files, and the UI picks it up automatically. If you later confirm that font's licence allows redistribution in a free app with a donate button, it can be bundled by default. Item sprites follow the same rule: they're loaded from local game files and never committed.
+  - **Font:** the font slot is pluggable. The repo ships a free OFL pixel font as the default. `web/public/fonts/` is gitignored, so you can drop in the Terraria font from dafontstyle, or Andy from your own game files, and the UI picks it up automatically. If you later confirm that font's licence allows redistributing it with a free app, it can be bundled by default. Item sprites follow the same rule: they're loaded from local game files and never committed.
   - **Screens:**
     - World and version setup.
     - NPC roster, with a happiness slider per NPC.
