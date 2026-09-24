@@ -11,6 +11,18 @@ from . import db
 from .schema import Dataset, ShimmerRule
 
 
+def build_db(
+    source: str | Path, out: str | Path | None = None, overrides: dict[str, Any] | None = None
+) -> tuple[Path, Dataset]:
+    """Build the curated SQLite db from an extractor JSON dump (or another db)."""
+    ds = load_dataset(source)
+    if overrides:
+        ds = apply_overrides(ds, overrides)
+    out = Path(out) if out else Path("data") / ds.version / "db.sqlite"
+    db.save(ds, out)
+    return out, ds
+
+
 def load_dataset(path: str | Path) -> Dataset:
     """Load a dataset from an extractor JSON dump or a curated SQLite file."""
     path = Path(path)

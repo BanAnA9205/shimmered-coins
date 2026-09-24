@@ -8,6 +8,11 @@ game files. Supported versions are 1.4.0 and later.
 
 Pick one:
 
+- **Automatically** (does everything below and cleans up): `shimcoins data fetch 1.4.5.8`.
+  It downloads the free dedicated-server zip from terraria.org, builds and runs the extractor,
+  writes `data/<version>/db.sqlite` and deletes the server files. `shimcoins data fetch` with no
+  version shows a menu, `--list` shows what terraria.org has. 1.4.0.x was never published as zips;
+  use the Steam beta branches for those.
 - **Steam install:** `TerrariaServer.exe` sits next to `Terraria.exe`, for example
   `C:\Program Files (x86)\Steam\steamapps\common\Terraria\`.
   For older versions: right-click Terraria in Steam, open **Properties → Betas**, pick a legacy branch, then copy the folder.

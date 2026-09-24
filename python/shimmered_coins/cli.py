@@ -6,10 +6,10 @@ import argparse
 import json
 import re
 import sys
-from pathlib import Path
 
-from .data import apply_overrides, diff, load_dataset
-from .data import db as dbmod
+from .data import build_db, diff, load_dataset
+from .data import fetch as fetch_mod
+from .data.fetch import FetchError
 from .data.schema import Dataset
 from .model import ANY_ZONE, KINDS, Constraints, NpcSetup, WorldConfig, build_graph, check_pricing
 from .model.conditions import flag_groups, zones
@@ -59,17 +59,47 @@ def _npcs(
 
 
 def cmd_data_build(a: argparse.Namespace) -> int:
-    ds = load_dataset(a.source)
+    overrides = None
     if a.overrides:
         with open(a.overrides, encoding="utf-8") as f:
-            ds = apply_overrides(ds, json.load(f))
-    out = Path(a.out) if a.out else Path("data") / ds.version / "db.sqlite"
-    dbmod.save(ds, out)
+            overrides = json.load(f)
+    out, ds = build_db(a.source, a.out, overrides)
     print(
         f"wrote {out}: {len(ds.items)} items, {len(ds.recipes)} recipes, "
         f"{len(ds.shops)} shop entries, {len(ds.shimmer)} shimmer rules"
     )
     return 0
+
+
+def cmd_data_fetch(a: argparse.Namespace) -> int:
+    if a.list:
+        return fetch_mod.list_servers()
+    version = a.version
+    if not version:
+        if not sys.stdin.isatty():
+            print("pass a version (or --yes with one) when not interactive", file=sys.stderr)
+            return 2
+        version = fetch_mod.choose_version()
+    try:
+        db, _ = fetch_mod.fetch(
+            version,
+            fetch_mod.data_root(),
+            confirm=None if a.yes else _confirm,
+            keep=a.keep,
+            progress=fetch_mod._default_progress,
+        )
+    except FetchError as e:
+        print(f"fetch failed: {e}", file=sys.stderr)
+        return 2
+    print(f"\nnext: shimcoins search {db} --all-npcs 1 --max-steps 5")
+    return 0
+
+
+def _confirm(question: str) -> bool:
+    try:
+        return input(question).strip().lower() not in ("n", "no")
+    except EOFError:
+        return False
 
 
 def cmd_data_info(a: argparse.Namespace) -> int:
@@ -205,6 +235,17 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     d = sub.add_parser("data", help="dataset tools").add_subparsers(dest="data_cmd", required=True)
+    f = d.add_parser(
+        "fetch",
+        help="download a game server from terraria.org, extract its data, build the db",
+    )
+    f.add_argument("version", nargs="?", help="e.g. 1.4.5.8 (or zip code 1458); menu if omitted")
+    f.add_argument("--yes", action="store_true", help="don't ask before downloading")
+    f.add_argument("--keep", action="store_true", help="keep the downloaded server files")
+    f.add_argument(
+        "--list", action="store_true", help="probe terraria.org for available versions and exit"
+    )
+    f.set_defaults(func=cmd_data_fetch)
     b = d.add_parser("build", help="extractor JSON -> curated SQLite")
     b.add_argument("source")
     b.add_argument("--overrides", help="JSON curation patch")
