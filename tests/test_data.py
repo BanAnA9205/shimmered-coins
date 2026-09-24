@@ -48,7 +48,10 @@ def test_diff(toy):
     items = dict(toy.items)
     items[ring] = dataclasses.replace(items[ring], value=15000)
     newer = dataclasses.replace(
-        toy, version="toy-2", items=items, shimmer=[s for s in toy.shimmer if s.kind != "transmute"]
+        toy,
+        version="toy-2",
+        items=items,
+        shimmer=[s for s in toy.shimmer if not (s.kind == "transmute" and s.item == 1)],
     )
     d = diff(toy, newer)
     assert d["value_changed"] == [("Ring", 20000, 15000)]
@@ -103,3 +106,17 @@ def test_cli_search_and_build(tmp_path, capsys):
     out = capsys.readouterr().out
     payload = json.loads(out[out.index("{") :])
     assert payload["results"][0]["moves"][0]["kind"] == "buy"
+
+
+def test_cli_npc_zones(capsys):
+    args = ["search", str(TOY), "--npc", "Smith", "--max-steps", "3", "--top", "1"]
+    assert main(args + ["--npc", "Merchant=1@snow,forest"]) == 0
+    assert "Frost Charm" in capsys.readouterr().out
+    assert main(args + ["--npc", "Merchant@any"]) == 0
+    assert "living in snow" in capsys.readouterr().out
+    assert main(args + ["--npc", "Merchant", "--travel-stock", "Kit"]) == 0
+    capsys.readouterr()
+    assert main(["data", "info", str(TOY)]) == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["zones"] == ["snow"]
+    assert [f["name"] for f in info["flags"]["progression"]] == ["downedboss", "hardmode"]

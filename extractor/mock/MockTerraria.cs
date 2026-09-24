@@ -9,11 +9,12 @@ namespace Terraria.ID
 {
     public static class ItemID
     {
-        public const short Count = 8;  // ids 1..7
+        public const short Count = 16;  // ids 1..15
         public static class Sets
         {
             //                                          0   1   2   3   4   5   6   7
-            public static int[] ShimmerTransformToItem = { -1, -1, -1, -1, -1, 2, -1, -1 };
+            public static int[] ShimmerTransformToItem = { -1, -1, -1, -1, -1, 2, -1, -1,
+                                                           -1, -1, -1, -1, -1, -1, -1, -1 };
         }
     }
 
@@ -36,16 +37,32 @@ namespace Terraria
     {
         public static bool dedServ;
         public static bool hardMode;
+        public static bool dayTime = true;
+        public static bool bloodMoon;
+        public static int moonPhase;
+        public static int myPlayer = 255;
+        public static Player[] player = new Player[256];
+        public static NPC[] npc = new NPC[201];
+        public static Player LocalPlayer { get { return player[myPlayer]; } }
         public static string versionNumber = "v9.9.9.9";
         public static Recipe[] recipe = new Recipe[10];
         public static GameContent.ShopHelper ShopHelper = new GameContent.ShopHelper();
     }
 
-    public static class NPC
+    public class NPC
     {
         public static bool downedBoss3;
         public static bool downedMoonlord;
         public static bool downedGolemBoss;
+        public static bool downedMechBoss1, downedMechBoss2, downedMechBoss3;
+        public int type;
+        public bool active;
+
+        public static bool AnyNPCs(int type)
+        {
+            foreach (var n in Main.npc) if (n != null && n.active && n.type == type) return true;
+            return false;
+        }
     }
 
     public static class WorldGen { public static bool crimson; }
@@ -58,8 +75,9 @@ namespace Terraria
 
     public class Item
     {
-        static readonly string[] names = { "", "Iron Ore", "Iron Bar", "Chain", "Wood", "Lead Bar", "Chest", "Copper Coin" };
-        static readonly int[] values = { 0, 250, 750, 60, 0, 700, 100, 1 };
+        static readonly string[] names = { "", "Iron Ore", "Iron Bar", "Chain", "Wood", "Lead Bar", "Chest", "Copper Coin",
+            "Snow Globe", "Moon Charm", "Snow Pylon", "Guide Book", "Golf Trophy", "Quarter Charm", "Night Owl", "Mech Part" };
+        static readonly int[] values = { 0, 250, 750, 60, 0, 700, 100, 1, 900, 800, 100000, 50, 5000, 400, 300, 2500 };
         public int type, stack = 1, maxStack = 1, value;
         public int? shopCustomPrice;
         public int shopSpecialCurrency = -1;
@@ -121,17 +139,43 @@ namespace Terraria
         public HashSet<int> ValidItems;
     }
 
+    public class LocalizedText { public string Value; }
+
     public class Condition
     {
-        public static readonly Condition Hardmode = new Condition();
-        public static readonly Condition PreHardmode = new Condition();
-        public static readonly Condition DownedMoonLord = new Condition();
-        public static readonly Condition BloodMoon = new Condition();
-        public static readonly Condition NotBloodMoon = new Condition();
+        public LocalizedText Description;
+        public Func<bool> Predicate;
+        public Condition(string text, Func<bool> predicate) { Description = new LocalizedText { Value = text }; Predicate = predicate; }
+        public bool IsMet() { return Predicate(); }
+
+        public static readonly Condition Hardmode = new Condition("In Hardmode", () => Main.hardMode);
+        public static readonly Condition PreHardmode = new Condition("Before Hardmode", () => !Main.hardMode);
+        public static readonly Condition DownedMoonLord = new Condition("Moon Lord defeated", () => NPC.downedMoonlord);
+        public static readonly Condition BloodMoon = new Condition("During a Blood Moon", () => Main.bloodMoon);
+        public static readonly Condition NotBloodMoon = new Condition("Not during a Blood Moon", () => !Main.bloodMoon);
+        public static readonly Condition InSnow = new Condition("In Snow", () => Main.LocalPlayer.ZoneSnow);
+        public static readonly Condition TimeNight = new Condition("At night", () => !Main.dayTime);
+        public static readonly Condition MoonPhaseFull = new Condition("During a full moon", () => Main.moonPhase == 0);
+        public static readonly Condition MoonPhasesQuarters = new Condition("During a quarter moon", () => Main.moonPhase == 2 || Main.moonPhase == 6);
+        public static readonly Condition HappyEnoughToSellPylons = new Condition("When the NPC is happy",
+            () => Main.LocalPlayer.currentShoppingSettings.PriceAdjustment <= 0.8999999761581421);
+        public static readonly Condition DownedMechBossAll = new Condition("All mechanical bosses defeated",
+            () => NPC.downedMechBoss1 && NPC.downedMechBoss2 && NPC.downedMechBoss3);
+
+        public static Condition NpcIsPresent(int type) { return new Condition("When NPC " + type + " is present", () => NPC.AnyNPCs(type)); }
+        public static Condition GolfScoreOver(int score) { return new Condition("Golf score over " + score, () => Main.LocalPlayer.golferScoreAccumulated > score); }
     }
+
+    public struct ShoppingSettings { public double PriceAdjustment; }
 
     public class Player
     {
+        public ShoppingSettings currentShoppingSettings = new ShoppingSettings { PriceAdjustment = 1 };
+        public int golferScoreAccumulated;
+        public bool ZoneSnow { get; set; }
+        public bool ZoneDesert { get; set; }
+        public bool ZoneOverworldHeight { get; set; }
+
         // Mirrors the real signature; the mock formula is deliberately simple.
         public void GetItemExpectedPrice(Item item, out long calcForSelling, out long calcForBuying)
         {
@@ -145,6 +189,19 @@ namespace Terraria
     {
         public Item[] item = new Item[40];
         public Chest(bool bank = false) { }
+
+        // Old-style hard-coded shop (1.4.0-1.4.3 shape): shop 1 is the Merchant.
+        public void SetupShop(int type)
+        {
+            int n = 0;
+            if (type != 1) return;
+            item[n++] = Item.Make(1, 1);
+            if (Main.LocalPlayer.ZoneSnow) item[n++] = Item.Make(8, 1);
+            else if (Main.LocalPlayer.ZoneDesert) item[n++] = Item.Make(9, 1);
+            if (!Main.dayTime) item[n++] = Item.Make(14, 1);
+            if (!Main.dayTime && Main.LocalPlayer.ZoneDesert) item[n++] = Item.Make(13, 1);
+            if (Main.hardMode) item[n++] = Item.Make(2, 1);
+        }
     }
 }
 
@@ -173,17 +230,28 @@ namespace Terraria.GameContent
 
         public static void Initialize()
         {
+            for (int i = 0; i < Main.npc.Length; i++) Main.npc[i] = new NPC();
+            Main.player[Main.myPlayer] = new Player();
             var bar = Item.Make(2, 1);
             bar.shopCustomPrice = 2000;
             AllShops.Clear();
+            Func<int, Condition[], NPCShop.Entry> E = (t, cs) => new NPCShop.Entry { Item = Item.Make(t, 1), Conditions = new List<Condition>(cs) };
             AllShops.Add(new NPCShop
             {
                 NpcType = 17,
                 Entries = new List<NPCShop.Entry>
                 {
-                    new NPCShop.Entry { Item = Item.Make(1, 1), Conditions = new List<Condition>() },
-                    new NPCShop.Entry { Item = Item.Make(4, 1), Conditions = new List<Condition> { Condition.PreHardmode } },
+                    E(1, new Condition[0]),
+                    E(4, new[] { Condition.PreHardmode }),
                     new NPCShop.Entry { Item = bar, Conditions = new List<Condition> { Condition.Hardmode, Condition.NotBloodMoon } },
+                    E(8, new[] { Condition.InSnow }),
+                    E(9, new[] { Condition.MoonPhaseFull }),
+                    E(13, new[] { Condition.MoonPhasesQuarters }),
+                    E(10, new[] { Condition.InSnow, Condition.HappyEnoughToSellPylons }),
+                    E(11, new[] { Condition.NpcIsPresent(22) }),
+                    E(12, new[] { Condition.GolfScoreOver(500) }),
+                    E(14, new[] { Condition.TimeNight }),
+                    E(15, new[] { Condition.DownedMechBossAll }),
                 },
             });
         }

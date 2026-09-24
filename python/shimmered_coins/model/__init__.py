@@ -1,7 +1,19 @@
 from .graph import BUY, CRAFT, KINDS, SELL, SHIMMER, Constraints, Graph, Transform, build_graph
-from .world import NpcSetup, WorldConfig, buy_price, check_pricing, sell_price
+from .world import (
+    ANY_ZONE,
+    NpcSetup,
+    WorldConfig,
+    buy_price,
+    check_pricing,
+    condition_holds,
+    conditions_hold,
+    sell_price,
+)
 
 __all__ = [
+    "ANY_ZONE",
+    "condition_holds",
+    "conditions_hold",
     "BUY",
     "CRAFT",
     "KINDS",

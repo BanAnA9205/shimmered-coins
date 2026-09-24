@@ -11,7 +11,8 @@ from pathlib import Path
 from .data import apply_overrides, diff, load_dataset
 from .data import db as dbmod
 from .data.schema import Dataset
-from .model import KINDS, Constraints, NpcSetup, WorldConfig, build_graph, check_pricing
+from .model import ANY_ZONE, KINDS, Constraints, NpcSetup, WorldConfig, build_graph, check_pricing
+from .model.conditions import flag_groups, zones
 from .search import SearchParams, search
 
 _COIN_RE = re.compile(r"(\d+)\s*([pgsc])", re.I)
@@ -36,15 +37,25 @@ def _items(ds: Dataset, names: list[str] | None) -> frozenset[int]:
     return frozenset(out)
 
 
-def _npcs(ds: Dataset, specs: list[str] | None, all_at: float | None) -> dict[int, float]:
+def _npcs(
+    ds: Dataset, specs: list[str] | None, all_at: float | None
+) -> tuple[dict[int, float], dict[int, frozenset[str] | str]]:
+    """Parse ``NAME[=ADJ][@ZONE,ZONE|@any]`` specs into happiness and zone maps."""
     happy: dict[int, float] = {}
+    npc_zones: dict[int, frozenset[str] | str] = {}
     if all_at is not None:
         happy = {n.id: all_at for n in ds.npcs.values() if n.has_shop}
     for spec in specs or []:
-        name, _, adj = spec.partition("=")
+        head, _, where = spec.partition("@")
+        name, _, adj = head.partition("=")
         npc = int(name) if name.isdigit() else ds.npc_by_name(name).id
         happy[npc] = float(adj) if adj else 1.0
-    return happy
+        if where:
+            where = where.strip().lower()
+            npc_zones[npc] = (
+                ANY_ZONE if where == ANY_ZONE else frozenset(z.strip() for z in where.split(","))
+            )
+    return happy, npc_zones
 
 
 def cmd_data_build(a: argparse.Namespace) -> int:
@@ -75,6 +86,8 @@ def cmd_data_info(a: argparse.Namespace) -> int:
                 "shimmer": len(ds.shimmer),
                 "npcs": [n.name for n in ds.npcs.values()],
                 "pricing_check": check_pricing(ds.meta.get("pricing_probe", [])),
+                "flags": flag_groups(ds),
+                "zones": zones(ds),
             },
             indent=2,
         )
@@ -99,12 +112,17 @@ def cmd_data_diff(a: argparse.Namespace) -> int:
 
 def cmd_search(a: argparse.Namespace) -> int:
     ds = load_dataset(a.dataset)
-    happiness = _npcs(ds, a.npc, a.all_npcs)
+    happiness, npc_zones = _npcs(ds, a.npc, a.all_npcs)
     if not happiness:
         print("no NPCs given: use --npc NAME[=ADJ] or --all-npcs ADJ", file=sys.stderr)
         return 2
     world = WorldConfig(flags=frozenset(a.flag or ()), shimmer=not a.no_shimmer)
-    npcs = NpcSetup(happiness=happiness, discount=a.discount)
+    npcs = NpcSetup(
+        happiness=happiness,
+        discount=a.discount,
+        zones=npc_zones,
+        travel_stock=_items(ds, a.travel_stock),
+    )
     kinds = frozenset(a.kinds.split(",")) if a.kinds else frozenset(KINDS)
     cons = Constraints(
         kinds=kinds,
@@ -206,8 +224,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument(
         "--npc",
         action="append",
-        metavar="NAME[=ADJ]",
-        help="present NPC and its happiness price adjustment (0.75 happiest..1.5)",
+        metavar="NAME[=ADJ][@ZONES]",
+        help="present NPC, its happiness price adjustment (0.75 happiest..1.5) and the biome "
+        "zones it lives in, e.g. Merchant=0.9@snow or Merchant@any (try every biome)",
+    )
+    s.add_argument(
+        "--travel-stock", action="append", help="item the Travelling Merchant sells today"
     )
     s.add_argument("--all-npcs", type=float, metavar="ADJ", help="all shop NPCs present at ADJ")
     s.add_argument("--discount", action="store_true", help="Discount Card equipped")

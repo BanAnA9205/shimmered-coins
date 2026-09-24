@@ -17,7 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..data import Dataset, load_dataset
-from ..model import KINDS, Constraints, NpcSetup, WorldConfig, build_graph
+from ..model import ANY_ZONE, KINDS, Constraints, NpcSetup, WorldConfig, build_graph
+from ..model.conditions import flag_groups, zones
 from ..model.graph import Graph, Transform, format_coins
 from ..search import SearchParams, search
 
@@ -53,15 +54,9 @@ def get_dataset(ds_id: str) -> Dataset:
     return _load(str(path), path.stat().st_mtime)
 
 
-def dataset_flags(ds: Dataset) -> list[str]:
-    conds: set[str] = set()
-    for r in ds.recipes:
-        conds.update(r.conditions)
-    for s in ds.shops:
-        conds.update(s.conditions)
-    for s in ds.shimmer:
-        conds.update(s.conditions)
-    return sorted({c.lstrip("!").lower() for c in conds})
+class NpcIn(BaseModel):
+    adjustment: float = 1.0
+    zones: list[str] | str = []  # biome zones, or "any"
 
 
 class SearchRequest(BaseModel):
@@ -69,7 +64,10 @@ class SearchRequest(BaseModel):
     flags: list[str] = []
     shimmer: bool = True
     discount: bool = False
-    npcs: dict[int, float] = Field(default_factory=dict, description="npc id -> price adjustment")
+    npcs: dict[int, float | NpcIn] = Field(
+        default_factory=dict, description="npc id -> price adjustment, or {adjustment, zones}"
+    )
+    travel_stock: list[int] = []
     kinds: list[str] = list(KINDS)
     include: list[int] | None = None
     exclude: list[int] = []
@@ -83,6 +81,23 @@ class SearchRequest(BaseModel):
     budget: int | None = None
     time_limit: float = Field(30.0, gt=0, le=MAX_TIME_LIMIT)
     max_nodes: int = Field(500_000, ge=1)
+
+
+def npc_setup(req: SearchRequest) -> NpcSetup:
+    happiness: dict[int, float] = {}
+    npc_zones: dict[int, frozenset[str] | str] = {}
+    for npc, v in req.npcs.items():
+        if isinstance(v, NpcIn):
+            happiness[npc] = v.adjustment
+            npc_zones[npc] = ANY_ZONE if v.zones == ANY_ZONE else frozenset(v.zones)
+        else:
+            happiness[npc] = v
+    return NpcSetup(
+        happiness=happiness,
+        discount=req.discount,
+        zones=npc_zones,
+        travel_stock=frozenset(req.travel_stock),
+    )
 
 
 def _stack(g: Graph, pairs: tuple[tuple[int, int], ...], batches: int) -> list[dict]:
@@ -128,7 +143,8 @@ def create_app() -> FastAPI:
             "recipes": len(ds.recipes),
             "shimmer_rules": len(ds.shimmer),
             "npcs": [{"id": n.id, "name": n.name} for n in ds.npcs.values() if n.has_shop],
-            "flags": dataset_flags(ds),
+            "flag_groups": flag_groups(ds),
+            "zones": zones(ds),
         }
 
     @app.get("/api/datasets/{ds_id}/items")
@@ -150,7 +166,7 @@ def create_app() -> FastAPI:
         g = build_graph(
             ds,
             WorldConfig(flags=frozenset(req.flags), shimmer=req.shimmer),
-            NpcSetup(happiness=dict(req.npcs), discount=req.discount),
+            npc_setup(req),
             Constraints(
                 kinds=frozenset(req.kinds),
                 include_items=frozenset(req.include) if req.include is not None else None,

@@ -17,43 +17,27 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def run(*cmd):
+    subprocess.run([str(c) for c in cmd], check=True, capture_output=True)
+
+
 @pytest.fixture(scope="module")
 def dump(tmp_path_factory):
     d = tmp_path_factory.mktemp("mock")
     ex = ROOT / "extractor"
-    subprocess.run(
-        [
-            "mcs",
-            "-nologo",
-            "-langversion:5",
-            f"-out:{d / 'TerrariaExtractor.exe'}",
-            str(ex / "TerrariaExtractor.cs"),
-        ],
-        check=True,
+    exe, game = d / "TerrariaExtractor.exe", d / "TerrariaServer.exe"
+    run(
+        "mcs",
+        "-nologo",
+        "-langversion:5",
+        f"-out:{exe}",
+        ex / "TerrariaExtractor.cs",
+        ex / "Probing.cs",
     )
-    subprocess.run(
-        [
-            "mcs",
-            "-nologo",
-            "-target:library",
-            f"-out:{d / 'TerrariaServer.exe'}",
-            str(ex / "mock" / "MockTerraria.cs"),
-        ],
-        check=True,
-    )
-    out = d / "dump.json"
-    subprocess.run(
-        [
-            "mono",
-            str(d / "TerrariaExtractor.exe"),
-            str(d / "TerrariaServer.exe"),
-            "--out",
-            str(out),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    return out
+    run("mcs", "-nologo", "-target:library", f"-out:{game}", ex / "mock" / "MockTerraria.cs")
+    run("mono", exe, game, "--out", d / "dump.json")
+    run("mono", exe, game, "--out", d / "legacy.json", "--legacy-shops")
+    return d / "dump.json"
 
 
 def test_extracted_dataset(dump):
@@ -68,12 +52,6 @@ def test_extracted_dataset(dump):
         (2, None, 2),
     ]
     assert next(r for r in ds.recipes if r.id == 3).conditions == ("crimson",)
-    shops = {(s.item, s.conditions, s.price) for s in ds.shops}
-    assert shops == {
-        (1, (), None),
-        (4, ("!hardmode",), None),
-        (2, ("hardmode", "!bloodmoon"), 2000),
-    }
     rules = {(s.kind, s.item, s.conditions) for s in ds.shimmer}
     assert rules == {
         ("decraft", 2, ()),
@@ -83,6 +61,60 @@ def test_extracted_dataset(dump):
         ("decraft", 6, ("downedboss3",)),
     }
     assert len(ds.meta["pricing_probe"]) == 25
+
+
+def test_modern_shop_conditions(dump):
+    ds = load_dataset(dump)
+    shops = {(s.item, s.conditions, s.price) for s in ds.shops}
+    assert shops == {
+        (1, (), None),
+        (4, ("!hardmode",), None),
+        (2, ("hardmode", "!bloodmoon"), 2000),
+        (8, ("zone:snow",), None),
+        (9, ("moon:0",), None),
+        (13, ("moon:2",), None),  # "quarter moon" = phase 2 OR 6 -> two entries
+        (13, ("moon:6",), None),
+        (10, ("zone:snow", "happy<=0.9"), None),  # pylon
+        (11, ("npc:22",), None),
+        (12, ("player:golf-score-over-500",), None),
+        (14, ("!daytime",), None),
+        (15, ("downedmechboss1", "downedmechboss2", "downedmechboss3"), None),
+    }
+    info = ds.condition_info
+    assert (info("zone:snow").scope, info("zone:snow").description) == ("zone", "In Snow")
+    assert info("happy<=0.9").scope == "happiness"
+    assert info("npc:22").scope == "npc_present"
+    assert info("player:golf-score-over-500").scope == "player"
+    assert info("hardmode").description == "In Hardmode"
+
+
+def test_legacy_shops(dump):
+    ds = load_dataset(dump.parent / "legacy.json")
+    shops = {(s.item, s.conditions) for s in ds.shops}
+    assert shops == {
+        (1, ()),
+        (2, ("hardmode",)),
+        (8, ("zone:snow",)),
+        (9, ("zone:desert",)),
+        (14, ("!daytime",)),
+        (13, ("!daytime", "zone:desert")),  # only visible when two things change at once
+    }
+
+
+def test_extracted_zones_are_per_npc(dump):
+    ds = load_dataset(dump)
+
+    def items(**kw):
+        g = build_graph(ds, WorldConfig(flags=frozenset({"hardmode"})), NpcSetup(**kw))
+        return {g.name(i) for i in g.buy_of}
+
+    snow = {17: frozenset({"snow"})}
+    assert "Snow Globe" not in items(happiness={17: 1.0})
+    assert "Snow Globe" in items(happiness={17: 1.0}, zones=snow)
+    assert "Snow Pylon" not in items(happiness={17: 1.0}, zones=snow)
+    assert "Snow Pylon" in items(happiness={17: 0.9}, zones=snow)
+    assert "Guide Book" not in items(happiness={17: 1.0})
+    assert "Guide Book" in items(happiness={17: 1.0, 22: 1.0})
 
 
 def test_extracted_conditions_drive_the_graph(dump):
@@ -104,5 +136,6 @@ def test_extracted_conditions_drive_the_graph(dump):
 def test_cli_pipeline(dump, tmp_path, capsys):
     db = tmp_path / "db.sqlite"
     assert main(["data", "build", str(dump), "--out", str(db)]) == 0
+    assert load_dataset(db).condition_info("zone:snow").description == "In Snow"
     assert main(["search", str(db), "--npc", "Merchant", "--allow-loss", "--max-steps", "3"]) == 0
     assert "9.9.9.9" in capsys.readouterr().out

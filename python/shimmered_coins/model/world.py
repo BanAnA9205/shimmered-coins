@@ -34,12 +34,21 @@ class WorldConfig:
         return True
 
 
+ANY_ZONE = "any"  # "what if this NPC lived anywhere": every zone condition passes
+
+
 @dataclass(frozen=True)
 class NpcSetup:
-    """Present NPCs and their happiness price adjustment.
+    """Present NPCs, their happiness price adjustment and where they live.
 
     ``happiness`` maps npc id -> price adjustment as used by the game: 1.0 is neutral, lower is
     happier (0.75 best). The game clamps it to roughly [0.75, 1.5].
+
+    ``zones`` maps npc id -> the biome zones where you talk to it (e.g. ``{"snow"}``), or
+    ``ANY_ZONE`` to consider every biome. Shop conditions like ``zone:snow`` are checked against
+    the selling NPC's own zones. NPCs without an entry stand in no special biome.
+
+    ``travel_stock`` is today's Travelling Merchant stock (random in game, so entered by hand).
     """
 
     happiness: dict[int, float] = field(default_factory=dict)
@@ -47,15 +56,65 @@ class NpcSetup:
     # Whether happiness also changes what NPCs pay you. TODO(extractor): confirm against
     # Player.GetItemExpectedPrice for every supported version.
     happiness_affects_selling: bool = True
+    zones: dict[int, frozenset[str] | str] = field(default_factory=dict)
+    travel_stock: frozenset[int] = frozenset()
 
     def present(self, npc: int) -> bool:
         return npc in self.happiness
+
+    def zones_of(self, npc: int) -> frozenset[str] | str:
+        z = self.zones.get(npc, frozenset())
+        return z if z == ANY_ZONE else frozenset(x.lower() for x in z)
 
     def best_sell_adjustment(self) -> float:
         """Selling: any shop NPC buys any item, so only the happiest one matters."""
         if not self.happiness or not self.happiness_affects_selling:
             return 1.0
         return min(self.happiness.values())
+
+
+def condition_holds(
+    cond: str, world: WorldConfig, npc: int | None = None, npcs: NpcSetup | None = None
+) -> bool:
+    """Evaluate one typed condition string (see docs/DATA_FORMAT.md, "Conditions").
+
+    ``zone:x`` and ``happy<=v`` are about the selling NPC; ``npc:id`` asks whether that NPC
+    lives in town; ``need:x`` (crafting next to water, in snow, ...) is assumed reachable;
+    everything else is a world flag.
+    """
+    c = cond.lower()
+    if c.startswith("!"):
+        inner = c[1:]
+        if inner.startswith("zone:") and npcs is not None and npc is not None:
+            if npcs.zones_of(npc) == ANY_ZONE:
+                return True  # what-if mode: the NPC can also live elsewhere
+        return not condition_holds(inner, world, npc, npcs)
+    if c.startswith("zone:"):
+        if npcs is None or npc is None:
+            return True
+        z = npcs.zones_of(npc)
+        return z == ANY_ZONE or c[5:] in z
+    if c.startswith("happy<="):
+        if npcs is None or npc is None:
+            return True
+        return npcs.happiness.get(npc, 99.0) <= float(c[7:]) + 1e-9
+    if c.startswith("npc:") and npcs is not None:
+        try:
+            return npcs.present(int(c[4:]))
+        except ValueError:
+            return c in world.flags
+    if c.startswith("need:"):
+        return True
+    return c in world.flags
+
+
+def conditions_hold(
+    conds: tuple[str, ...] | list[str],
+    world: WorldConfig,
+    npc: int | None = None,
+    npcs: NpcSetup | None = None,
+) -> bool:
+    return all(condition_holds(c, world, npc, npcs) for c in conds)
 
 
 def buy_price(base_price: int, adjustment: float, discount: bool) -> int:

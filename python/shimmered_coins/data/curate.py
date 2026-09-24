@@ -58,7 +58,17 @@ def apply_overrides(ds: Dataset, overrides: dict[str, Any]) -> Dataset:
     shops = [s for s in ds.shops if (s.npc, s.item) not in drop_shops]
 
     meta = {**ds.meta, "overrides_applied": True}
-    return Dataset(ds.version, items, recipes, dict(ds.groups), shops, shimmer, dict(ds.npcs), meta)
+    return Dataset(
+        ds.version,
+        items,
+        recipes,
+        dict(ds.groups),
+        shops,
+        shimmer,
+        dict(ds.npcs),
+        meta,
+        dict(ds.conditions),
+    )
 
 
 def diff(a: Dataset, b: Dataset) -> dict[str, Any]:

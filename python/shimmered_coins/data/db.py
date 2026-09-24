@@ -31,6 +31,8 @@ CREATE TABLE shimmer (
     outputs TEXT NOT NULL, conditions TEXT NOT NULL);
 CREATE INDEX shimmer_item ON shimmer(item);
 CREATE TABLE npcs (id INTEGER PRIMARY KEY, name TEXT NOT NULL, has_shop INTEGER NOT NULL);
+CREATE TABLE conditions (
+    name TEXT PRIMARY KEY, scope TEXT NOT NULL, description TEXT NOT NULL, depends TEXT NOT NULL);
 """
 
 
@@ -96,6 +98,13 @@ def save(ds: Dataset, path: str | Path) -> None:
         con.executemany(
             "INSERT INTO npcs VALUES (?,?,?)",
             [(n.id, n.name, int(n.has_shop)) for n in ds.npcs.values()],
+        )
+        con.executemany(
+            "INSERT INTO conditions VALUES (?,?,?,?)",
+            [
+                (c.name, c.scope, c.description, json.dumps(c.depends))
+                for c in ds.conditions.values()
+            ],
         )
         con.commit()
     finally:
@@ -170,7 +179,19 @@ def load(path: str | Path) -> Dataset:
                 {"id": r[0], "name": r[1], "has_shop": bool(r[2])}
                 for r in con.execute("SELECT * FROM npcs ORDER BY id")
             ],
+            "conditions": _conditions(con),
         }
     finally:
         con.close()
     return Dataset.from_dict(d)
+
+
+def _conditions(con: sqlite3.Connection) -> list[dict]:
+    try:
+        rows = con.execute("SELECT name, scope, description, depends FROM conditions").fetchall()
+    except sqlite3.OperationalError:  # databases built before the catalog existed
+        return []
+    return [
+        {"name": n, "scope": sc, "description": de, "depends": json.loads(dp)}
+        for n, sc, de, dp in rows
+    ]

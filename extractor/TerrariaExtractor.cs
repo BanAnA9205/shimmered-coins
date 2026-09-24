@@ -20,7 +20,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 
-static class Program
+static partial class Program
 {
     const BindingFlags ANY = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
     const BindingFlags STATIC = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
@@ -34,16 +34,18 @@ static class Program
     {
         string path = null, outPath = "dump.json", version = null;
         bool probe = false;
+        bool forceLegacy = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--out") outPath = args[++i];
             else if (args[i] == "--version") version = args[++i];
             else if (args[i] == "--probe") probe = true;
+            else if (args[i] == "--legacy-shops") forceLegacy = true;
             else path = args[i];
         }
         if (path == null)
         {
-            Console.Error.WriteLine("usage: TerrariaExtractor <TerrariaServer.exe> [--out dump.json] [--version 1.4.5.8] [--probe]");
+            Console.Error.WriteLine("usage: TerrariaExtractor <TerrariaServer.exe> [--out dump.json] [--version 1.4.5.8] [--probe] [--legacy-shops]");
             return 2;
         }
         path = Path.GetFullPath(path);
@@ -72,8 +74,9 @@ static class Program
         Section("items", () => Items(j));
         Section("groups", () => Groups(j));
         Section("recipes", () => Recipes(j));
-        Section("npcs+shops", () => NpcsAndShops(j));
+        Section("npcs+shops", () => NpcsAndShops(j, forceLegacy));
         Section("shimmer", () => Shimmer(j));
+        WriteCatalog(j);
         j.End();
 
         File.WriteAllText(outPath, j.ToString(), new UTF8Encoding(false));
@@ -300,25 +303,39 @@ static class Program
         {
             if (f.FieldType != typeof(bool) || !(bool)f.GetValue(r)) continue;
             var n = f.Name;
-            if (n.StartsWith("need", StringComparison.Ordinal)) yield return "need:" + n.Substring(4).ToLowerInvariant();
+            if (n.StartsWith("need", StringComparison.Ordinal))
+            {
+                var lit = "need:" + n.Substring(4).ToLowerInvariant();
+                Register(lit, "craft_location", "Crafted " + n.Substring(4), null);
+                yield return lit;
+            }
             else if (n == "crimson") yield return "crimson";
             else if (n == "corruption") yield return "!crimson";
         }
-        // 1.4.4+: List<Condition> Conditions
+        // 1.4.4+: List<Condition> Conditions. Recipes can't hold alternatives, so the first way
+        // the conditions can hold is used (location conditions are treated as reachable anyway).
         object conds = null;
         try { conds = Get(r, "Conditions"); } catch { }
-        foreach (var c in Seq(conds)) yield return ConditionName(c);
+        var list = Seq(conds).ToList();
+        if (list.Count > 0)
+            foreach (var lit in Expand(list, 1)[0])
+                yield return lit.StartsWith("zone:", StringComparison.Ordinal) ? "need:" + lit.Substring(5) : lit;
     }
 
     // ------------------------------------------------------------------ npcs & shops ---------
 
-    static void NpcsAndShops(Json j)
+    static void NpcsAndShops(Json j, bool forceLegacy)
     {
         var shopNpcs = new SortedSet<int>();
         var entries = new List<string[]>();  // npc, item, price, currency, conditions(json), limited
         bool modern = false;
-        Try("NPCShopDatabase", () => { modern = ModernShops(shopNpcs, entries); });
-        if (!modern) Try("Chest.SetupShop (legacy)", () => LegacyShops(shopNpcs, entries));
+        try
+        {
+            if (!forceLegacy) Try("NPCShopDatabase", () => { modern = ModernShops(shopNpcs, entries); });
+            if (!modern) Try("Chest.SetupShop (legacy)", () => LegacyShops(shopNpcs, entries));
+        }
+        finally { RestoreKnobs(); }
+        Log("condition probing: " + probeEvaluations + " evaluations, " + Catalog.Count + " condition names");
 
         int npcCount = Convert.ToInt32(GetStatic("Terraria.ID.NPCID", "Count"));
         j.Key("npcs").Arr();
@@ -377,8 +394,10 @@ static class Program
             if (dict == null) return false;
             shops = ((IDictionary)dict.GetValue(null)).Values;
         }
+        var list = shops.Cast<object>().ToList();
+        foreach (var shop in list) shopNpcIds.Add(Convert.ToInt32(Get(shop, "NpcType")));
         int n = 0;
-        foreach (var shop in shops)
+        foreach (var shop in list)
         {
             int npc = Convert.ToInt32(Get(shop, "NpcType"));
             object es = null;
@@ -388,9 +407,12 @@ static class Program
             foreach (var e in (IEnumerable)es)
             {
                 var item = Get(e, "Item");
-                var conds = Seq(Get(e, "Conditions")).Select(ConditionName).ToList();
-                entries.Add(Entry(npc, item, conds, false));
-                n++;
+                // one entry per way the conditions can hold (e.g. "moon phase 2 or 6")
+                foreach (var conds in Expand(Seq(Get(e, "Conditions")), 32))
+                {
+                    entries.Add(Entry(npc, item, conds, false));
+                    n++;
+                }
             }
         }
         return n > 0;
@@ -403,31 +425,40 @@ static class Program
 
     static void LegacyShops(SortedSet<int> npcs, List<string[]> entries)
     {
-        Warn("legacy shop extraction: shop index -> NPC table and conditions are approximate");
+        Warn("legacy shop extraction: shop index -> NPC table is approximate and prices set inside SetupShop are not captured");
         var chestType = T("Terraria.Chest");
+        foreach (var id in LegacyShopNpc) if (id > 0) shopNpcIds.Add(id);
         for (int shop = 1; shop < LegacyShopNpc.Length; shop++)
         {
             int npc = LegacyShopNpc[shop];
-            Func<HashSet<int>> eval = () =>
+            int captured = shop;
+            var ev = new Evaluator<HashSet<int>>(() =>
             {
                 var chest = Activator.CreateInstance(chestType, new object[] { false });
-                CallInst(chest, "SetupShop", shop);
+                CallInst(chest, "SetupShop", captured);
                 var set = new HashSet<int>();
                 foreach (var it in (Array)Get(chest, "item"))
                     if (it != null && Convert.ToInt32(Get(it, "type")) > 0) set.Add(Convert.ToInt32(Get(it, "type")));
                 return set;
-            };
-            var variants = Conditional(eval);
-            if (variants.Count == 0) continue;
-            npcs.Add(npc);
-            foreach (var v in variants)
+            });
+            // every item the shop can ever show: reference state, one change, two changes
+            var seen = new HashSet<int>();
+            try
             {
-                // custom shop prices set inside SetupShop are not captured here (item value is used)
-                foreach (var type in v.Value)
-                {
-                    var item = NewItem(type);
-                    entries.Add(Entry(npc, item, v.Key, npc == 368));
-                }
+                seen.UnionWith(ev.At(new Dictionary<int, int>()) ?? new HashSet<int>());
+                foreach (var a in ev.Singles()) seen.UnionWith(ev.At(a) ?? new HashSet<int>());
+                foreach (var a in ev.Pairs()) seen.UnionWith(ev.At(a) ?? new HashSet<int>());
+            }
+            catch (Exception e) { Warn("legacy shop " + shop + ": " + Inner(e).Message); }
+            if (seen.Count == 0) continue;
+            npcs.Add(npc);
+            foreach (var type in seen.OrderBy(x => x))
+            {
+                int t = type;
+                var dnf = Dnf(ev, set => set != null && set.Contains(t), null);
+                var item = NewItem(type);
+                foreach (var conds in dnf.Take(32))
+                    entries.Add(Entry(npc, item, conds, npc == 368));
             }
         }
     }
@@ -525,6 +556,7 @@ static class Program
                 flags.Add(new Flag { Name = f.Name.ToLowerInvariant(), Field = f });
         var cr = T("Terraria.WorldGen").GetField("crimson", STATIC);
         if (cr != null) flags.Add(new Flag { Name = "crimson", Field = cr });
+        foreach (var f in flags) Register(f.Name, "world", f.Field.DeclaringType.Name + "." + f.Field.Name, f.Name, false);
         return flags;
     }
 
@@ -608,48 +640,6 @@ static class Program
         return a.Equals(b);
     }
 
-    // ------------------------------------------------------------------ conditions -----------
-
-    static Dictionary<object, string> conditionNames;
-
-    static string ConditionName(object cond)
-    {
-        if (conditionNames == null)
-        {
-            conditionNames = new Dictionary<object, string>();
-            var ct = T("Terraria.Condition");
-            if (ct != null)
-            {
-                foreach (var f in ct.GetFields(STATIC))
-                    if (f.FieldType == ct) { var v = f.GetValue(null); if (v != null && !conditionNames.ContainsKey(v)) conditionNames[v] = f.Name; }
-                foreach (var p in ct.GetProperties(STATIC))
-                    if (p.PropertyType == ct) { var v = p.GetValue(null, null); if (v != null && !conditionNames.ContainsKey(v)) conditionNames[v] = p.Name; }
-            }
-        }
-        string name;
-        if (!conditionNames.TryGetValue(cond, out name))
-        {
-            try { name = "cond:" + Convert.ToString(Get(Get(cond, "Description"), "Value")); }
-            catch { name = "cond:" + cond; }
-            return name;
-        }
-        return NormalizeCondition(name);
-    }
-
-    static string NormalizeCondition(string name)
-    {
-        var n = name.ToLowerInvariant();
-        switch (n)
-        {
-            case "prehardmode": return "!hardmode";
-            case "crimsonworld": return "crimson";
-            case "corruptworld": return "!crimson";
-        }
-        if (n.StartsWith("not") && conditionNames.Values.Any(v => v.ToLowerInvariant() == n.Substring(3)))
-            return "!" + n.Substring(3);
-        return n;
-    }
-
     // ------------------------------------------------------------------ pricing probe --------
     // Records what Player.GetItemExpectedPrice returns for a few happiness adjustments so the
     // Python side can check its pricing formula against the real game.
@@ -705,6 +695,8 @@ static class Program
                 Console.WriteLine("  " + Describe(mem));
         }
         Console.WriteLine("\nflags: " + string.Join(", ", Flags().Select(f => f.Name)));
+        try { Console.WriteLine("\nprobe knobs: " + string.Join(", ", Knobs().Select(k => k.Name))); }
+        finally { RestoreKnobs(); }
         Console.WriteLine("\nwarnings:");
         foreach (var w in Warnings) Console.WriteLine("  " + w);
     }

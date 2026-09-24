@@ -78,6 +78,39 @@ class ShimmerRule:
     conditions: tuple[str, ...] = ()
 
 
+CONDITION_SCOPES = ("world", "zone", "npc_present", "happiness", "craft_location", "player")
+
+
+@dataclass(frozen=True)
+class ConditionInfo:
+    """Catalog entry describing a condition string used by recipes, shops or shimmer rules.
+
+    ``scope`` says what the condition depends on (see CONDITION_SCOPES), ``depends`` lists the
+    game state the extractor found it to depend on, ``description`` is the game's own text.
+    """
+
+    name: str
+    scope: str = "world"
+    description: str = ""
+    depends: tuple[str, ...] = ()
+
+
+def infer_scope(name: str) -> str:
+    """Scope of a condition name when the dataset has no catalog entry for it."""
+    n = name.lower().lstrip("!")
+    if n.startswith("zone:"):
+        return "zone"
+    if n.startswith("npc:"):
+        return "npc_present"
+    if n.startswith("happy<="):
+        return "happiness"
+    if n.startswith("need:"):
+        return "craft_location"
+    if n.startswith("player:"):
+        return "player"
+    return "world"
+
+
 @dataclass(frozen=True)
 class Npc:
     id: int
@@ -95,6 +128,19 @@ class Dataset:
     shimmer: list[ShimmerRule] = field(default_factory=list)
     npcs: dict[int, Npc] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
+    conditions: dict[str, ConditionInfo] = field(default_factory=dict)
+
+    def condition_names(self) -> set[str]:
+        """Every condition used anywhere, without negation, lowercased."""
+        names: set[str] = set()
+        for group in (self.recipes, self.shops, self.shimmer):
+            for x in group:
+                names.update(c.lower().lstrip("!") for c in x.conditions)
+        return names
+
+    def condition_info(self, name: str) -> ConditionInfo:
+        key = name.lower().lstrip("!")
+        return self.conditions.get(key) or ConditionInfo(key, infer_scope(key))
 
     # ---- lookup helpers -------------------------------------------------------------------
     def item_by_name(self, name: str) -> Item:
@@ -147,7 +193,26 @@ class Dataset:
             for s in d.get("shimmer", [])
         ]
         npcs = {int(n["id"]): Npc(**n) for n in d.get("npcs", [])}
-        return cls(d["version"], items, recipes, groups, shops, shimmer, npcs, d.get("meta", {}))
+        conditions = {
+            c["name"].lower(): ConditionInfo(
+                name=c["name"].lower(),
+                scope=c.get("scope", infer_scope(c["name"])),
+                description=c.get("description", ""),
+                depends=tuple(c.get("depends", ())),
+            )
+            for c in d.get("conditions", [])
+        }
+        return cls(
+            d["version"],
+            items,
+            recipes,
+            groups,
+            shops,
+            shimmer,
+            npcs,
+            d.get("meta", {}),
+            conditions,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         def clean(obj: Any) -> Any:
@@ -167,4 +232,5 @@ class Dataset:
             "shops": [clean(asdict(s)) for s in self.shops],
             "shimmer": [clean(asdict(s)) for s in self.shimmer],
             "npcs": [clean(asdict(n)) for n in self.npcs.values()],
+            "conditions": [clean(asdict(c)) for c in self.conditions.values()],
         }

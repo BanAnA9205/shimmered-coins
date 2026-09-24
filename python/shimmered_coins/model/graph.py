@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from ..data.schema import Dataset, Recipe
-from .world import NpcSetup, WorldConfig, buy_price, sell_price
+from .world import ANY_ZONE, NpcSetup, WorldConfig, buy_price, conditions_hold, sell_price
 
 BUY, SELL, CRAFT, SHIMMER = "buy", "sell", "craft", "shimmer"
 KINDS = (BUY, SELL, CRAFT, SHIMMER)
@@ -69,8 +69,12 @@ class Graph:
             return " + ".join(f"{_num(c * batches)} {self.name(i)}" for i, c in pairs)
 
         if t.kind == BUY:
-            npc = self.dataset.npcs.get(t.npc)
+            npc = self.dataset.npcs.get(t.npc) if t.npc is not None else None
             who = f" from {npc.name}" if npc else ""
+            if t.ref == "travel":
+                who = " from the Travelling Merchant"
+            elif "@" in t.ref:
+                who += f" (living in {t.ref.split('@', 1)[1].replace('+', ' & ')})"
             return f"buy {fmt(t.outputs)}{who} for {format_coins(t.cost * batches)}"
         if t.kind == SELL:
             return f"sell {fmt(t.inputs)} for {format_coins(t.revenue * batches)}"
@@ -143,7 +147,9 @@ def build_graph(
     if BUY in constraints.kinds:
         best: dict[int, Transform] = {}
         for s in ds.shops:
-            if s.currency != "coins" or not npcs.present(s.npc) or not world.holds(s.conditions):
+            if s.currency != "coins" or not npcs.present(s.npc):
+                continue
+            if not conditions_hold(s.conditions, world, s.npc, npcs):
                 continue
             outs = ((s.item, 1),)
             if not allowed(outs):
@@ -152,12 +158,24 @@ def build_graph(
             if base <= 0:
                 continue
             price = buy_price(base, npcs.happiness[s.npc], npcs.discount)
-            t = Transform(
-                0, BUY, (), outs, cost=price, npc=s.npc, limited=s.limited, ref=f"shop:{s.npc}"
-            )
+            ref = f"shop:{s.npc}"
+            if npcs.zones_of(s.npc) == ANY_ZONE:  # say which biome the NPC must live in
+                zones = [c[5:] for c in s.conditions if c.lower().startswith("zone:")]
+                if zones:
+                    ref += "@" + "+".join(zones)
+            t = Transform(0, BUY, (), outs, cost=price, npc=s.npc, limited=s.limited, ref=ref)
             cur = best.get(s.item)
             if cur is None or (price, t.limited) < (cur.cost, cur.limited):
                 best[s.item] = t
+        for item in npcs.travel_stock:
+            outs = ((item, 1),)
+            it = items.get(item)
+            if it is None or it.value <= 0 or not allowed(outs):
+                continue
+            price = buy_price(it.value, 1.0, npcs.discount)
+            cur = best.get(item)
+            if cur is None or price < cur.cost:
+                best[item] = Transform(0, BUY, (), outs, cost=price, limited=True, ref="travel")
         raw.extend(best.values())
 
     # Sell: any shop NPC buys anything at value/5 adjusted by the happiest NPC.
@@ -176,7 +194,7 @@ def build_graph(
 
     if CRAFT in constraints.kinds:
         for r in ds.recipes:
-            if not world.holds(r.conditions):
+            if not conditions_hold(r.conditions, world):
                 continue
             if world.stations is not None and not set(r.stations) <= world.stations:
                 continue
@@ -187,7 +205,7 @@ def build_graph(
 
     if SHIMMER in constraints.kinds and world.shimmer:
         for s in ds.shimmer:
-            if not world.holds(s.conditions):
+            if not conditions_hold(s.conditions, world):
                 continue
             ins = ((s.item, s.count),)
             outs = tuple((i, c) for i, c in s.outputs if i not in coins)
