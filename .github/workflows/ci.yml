@@ -1,0 +1,31 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mono-mcs mono-runtime
+      - run: pip install -e ".[dev]"
+      - run: pip install ./cpp
+      - run: cmake -S cpp -B build && cmake --build build -j && ./build/core_test
+      - run: ruff check python tests
+      - run: ruff format --check python tests
+      - run: pytest -q
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run build

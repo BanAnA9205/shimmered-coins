@@ -1,0 +1,350 @@
+{
+  "schema": 1,
+  "version": "toy-1",
+  "meta": {
+    "note": "Hand-made test world. Names and numbers are invented, not Terraria data."
+  },
+  "npcs": [
+    {
+      "id": 1,
+      "name": "Smith"
+    },
+    {
+      "id": 2,
+      "name": "Merchant"
+    },
+    {
+      "id": 3,
+      "name": "Guide",
+      "has_shop": false
+    }
+  ],
+  "items": [
+    {
+      "id": 1,
+      "name": "Ore",
+      "value": 100,
+      "max_stack": 9999
+    },
+    {
+      "id": 2,
+      "name": "Bar",
+      "value": 450,
+      "max_stack": 9999
+    },
+    {
+      "id": 3,
+      "name": "Gem",
+      "value": 1000,
+      "max_stack": 9999
+    },
+    {
+      "id": 4,
+      "name": "Ring",
+      "value": 20000
+    },
+    {
+      "id": 5,
+      "name": "Kit",
+      "value": 5000
+    },
+    {
+      "id": 6,
+      "name": "Oak Wood",
+      "value": 10,
+      "max_stack": 9999
+    },
+    {
+      "id": 7,
+      "name": "Pine Wood",
+      "value": 10,
+      "max_stack": 9999
+    },
+    {
+      "id": 8,
+      "name": "Stick",
+      "value": 30,
+      "max_stack": 9999
+    },
+    {
+      "id": 9,
+      "name": "Bundle",
+      "value": 2000
+    },
+    {
+      "id": 10,
+      "name": "Junk",
+      "value": 0,
+      "max_stack": 9999,
+      "sellable": false
+    },
+    {
+      "id": 11,
+      "name": "Crown",
+      "value": 100000
+    },
+    {
+      "id": 12,
+      "name": "Copper Coin",
+      "value": 0,
+      "is_coin": true
+    },
+    {
+      "id": 13,
+      "name": "Frost Charm",
+      "value": 3000
+    },
+    {
+      "id": 14,
+      "name": "Snow Pylon",
+      "value": 50000
+    },
+    {
+      "id": 15,
+      "name": "Bottled Water",
+      "value": 20,
+      "max_stack": 9999
+    },
+    {
+      "id": 16,
+      "name": "Bottle",
+      "value": 20,
+      "max_stack": 9999
+    }
+  ],
+  "groups": [
+    {
+      "name": "Wood",
+      "items": [
+        6,
+        7
+      ],
+      "icon_item": 6
+    }
+  ],
+  "recipes": [
+    {
+      "id": 0,
+      "result": 2,
+      "result_stack": 1,
+      "ingredients": [
+        {
+          "item": 1,
+          "count": 3
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "result": 4,
+      "result_stack": 1,
+      "ingredients": [
+        {
+          "item": 2,
+          "count": 1
+        },
+        {
+          "item": 3,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "result": 8,
+      "result_stack": 3,
+      "ingredients": [
+        {
+          "group": "Wood",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "result": 11,
+      "result_stack": 1,
+      "ingredients": [
+        {
+          "item": 4,
+          "count": 1
+        }
+      ],
+      "conditions": [
+        "hardmode"
+      ]
+    },
+    {
+      "id": 4,
+      "result": 15,
+      "result_stack": 1,
+      "ingredients": [
+        {
+          "item": 16,
+          "count": 1
+        }
+      ],
+      "conditions": [
+        "need:water"
+      ]
+    }
+  ],
+  "shops": [
+    {
+      "npc": 1,
+      "item": 1
+    },
+    {
+      "npc": 2,
+      "item": 3
+    },
+    {
+      "npc": 2,
+      "item": 6
+    },
+    {
+      "npc": 2,
+      "item": 9,
+      "price": 2000
+    },
+    {
+      "npc": 1,
+      "item": 5,
+      "price": 6000,
+      "conditions": [
+        "downedBoss"
+      ]
+    },
+    {
+      "npc": 2,
+      "item": 2,
+      "price": 900,
+      "limited": true
+    },
+    {
+      "npc": 2,
+      "item": 13,
+      "price": 1500,
+      "conditions": [
+        "zone:snow"
+      ]
+    },
+    {
+      "npc": 2,
+      "item": 14,
+      "price": 100000,
+      "conditions": [
+        "zone:snow",
+        "happy<=0.9"
+      ]
+    },
+    {
+      "npc": 2,
+      "item": 16
+    },
+    {
+      "npc": 1,
+      "item": 3,
+      "price": 1100,
+      "conditions": [
+        "npc:2"
+      ]
+    }
+  ],
+  "shimmer": [
+    {
+      "kind": "decraft",
+      "item": 8,
+      "count": 3,
+      "outputs": [
+        [
+          6,
+          2
+        ]
+      ]
+    },
+    {
+      "kind": "decraft",
+      "item": 9,
+      "count": 1,
+      "outputs": [
+        [
+          3,
+          2
+        ],
+        [
+          10,
+          5
+        ]
+      ]
+    },
+    {
+      "kind": "decraft",
+      "item": 5,
+      "count": 1,
+      "outputs": [
+        [
+          4,
+          1
+        ]
+      ]
+    },
+    {
+      "kind": "transmute",
+      "item": 1,
+      "count": 1,
+      "outputs": [
+        [
+          3,
+          1
+        ]
+      ],
+      "conditions": [
+        "downedBoss"
+      ]
+    },
+    {
+      "kind": "transmute",
+      "item": 13,
+      "count": 1,
+      "outputs": [
+        [
+          4,
+          1
+        ]
+      ]
+    }
+  ],
+  "conditions": [
+    {
+      "name": "hardmode",
+      "scope": "world",
+      "description": "Hardmode"
+    },
+    {
+      "name": "downedboss",
+      "scope": "world",
+      "description": "The boss has been defeated"
+    },
+    {
+      "name": "zone:snow",
+      "scope": "zone",
+      "description": "In Snow"
+    },
+    {
+      "name": "happy<=0.9",
+      "scope": "happiness",
+      "description": "The NPC is happy enough"
+    },
+    {
+      "name": "npc:2",
+      "scope": "npc_present",
+      "description": "The Merchant lives in town"
+    },
+    {
+      "name": "need:water",
+      "scope": "craft_location",
+      "description": "Near water"
+    }
+  ]
+}
