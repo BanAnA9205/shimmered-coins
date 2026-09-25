@@ -12,8 +12,6 @@ jobs:
           python-version: "3.11"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mono-mcs mono-runtime
       - run: pip install -e ".[dev]"
-      - run: pip install ./cpp
-      - run: cmake -S cpp -B build && cmake --build build -j && ./build/core_test
       - run: ruff check python tests
       - run: ruff format --check python tests
       - run: pytest -q

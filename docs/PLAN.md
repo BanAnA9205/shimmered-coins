@@ -4,12 +4,12 @@
 The repo is empty apart from the README and LICENSE. The goal is an engine that searches for money-making sequences in Terraria, where
 `gain = (coins_out − coins_in) / coins_in`.
 
-A sequence is any interleaving of buy, craft, shimmer and sell moves. Examples: buy → shimmer → craft → sell, or buy → craft → shimmer → craft → shimmer → sell. A move can also use only part of the inventory. For example, you can decraft into a set of items, craft with a subset of them, and keep or sell the rest later.
+A chain always has the shape **buys → any mix of crafts and shimmers → sell everything**. Crafts and shimmers can interleave freely, and a move can use only part of what you hold: decraft into a set of items, craft with a subset, and keep or sell the rest. The search itself is designed in [`ALGORITHM.md`](ALGORITHM.md).
 
 Supported versions are **1.4.0 or later**. The current version is 1.4.5.8 (September 2026). It needs data for any game version, NPC and happiness inputs, both unconstrained and constrained search with a `max_steps` limit, and a Terraria-style local web UI.
 
 Stack decisions:
-- **Backend:** C++ search core, with Python for the data pipeline, API and orchestration. The user works in C++, Python and HPC libraries.
+- **Backend:** Python, with established HPC libraries doing the heavy lifting: HiGHS (`highspy`) for LP/MILP, and `scipy.sparse`/NumPy for the table. There is no hand-written solver. The earlier C++ core was removed once the design moved to LPs.
 - **Frontend:** React + TypeScript + Vite, run as a local web app. The user hasn't picked a frontend stack yet, so this is my recommendation.
 - **Data:** a small C# extractor that loads the game's own server binary.
 
@@ -52,7 +52,7 @@ Stack decisions:
   - `shimmer_transmute`, `shimmer_decraft`, `npcs`
   - `meta(version, source_sha256, extracted_at)`
 - `overrides.yaml` holds manual curation patches, applied at build time.
-- `graph.npz` is compiled per *(version, world config)*. It stores transforms as CSR arrays (inputs, outputs, kind, cost) and is what the C++ core loads, which makes loading very fast.
+- The engine compiles the move graph for a *(version, world config)* into a sparse item × move table (`scipy.sparse`), which HiGHS solves directly.
 - Commands: `shimcoins data fetch|extract|build|diff <v1> <v2>`. The diff shows what changed between patches, which is useful for seeing when a loop was fixed.
 
 ## 3. Model
@@ -68,34 +68,13 @@ Stack decisions:
   Edges are filtered by the world config and by the search constraints.
 
 ## 4. Search engine
-**Node and move:**
-- A node is a state: sparse inventory, coins spent, coins held, and the steps used.
-- A move is a *(transform, quantity)* pair.
-- The tree matches your model: the root is an empty inventory, each child applies one move, and a leaf is scored after optional liquidation.
 
-**Moves can come in any order, and quantities are worked out separately from the choice of moves.**
-- **Tree levels:** the search tree branches on *which* transform to apply next. Any kind can follow any kind, and repeats are allowed (buy → shimmer → craft → shimmer → craft → sell …). The only limits are `max_steps` and the constraints.
-- **How much each move uses:** decided per branch by a small **linear program**, not by an "all-in" rule. Each move uses a quantity `x_i ≥ 0`, and the inventory after every step must stay ≥ 0. Anything not consumed stays in the inventory: part of a decraft's output can be crafted later, part sold, and part left over.
-- **Capital:** the "initial cost" is the peak coin outlay, meaning the largest cumulative spend minus revenue over all the steps so far. Buying later with money from earlier sales doesn't add to it.
-- **Solving the ratio objective:** normalize capital to ≤ 1 (the Charnes–Cooper transform) and maximize final net coins. This is an ordinary LP with only a few variables, and the optimal value *is* the gain. Parent solutions warm-start the child LPs.
-- **Whole numbers:** a *quantizer* turns the fractional solution into whole items and whole batches, respecting batch sizes for crafting and decrafting and rounding down to whole copper. It scales by the smallest workable integer multiplier, or uses a tiny MILP when that isn't exact.
+**Superseded.** The first version searched move sequences step by step, with a branch-and-bound tree, a per-sequence LP and a C++ port. It was replaced by the recipe-based design in [`ALGORITHM.md`](ALGORITHM.md):
 
-**Algorithms**, all sharing one interface:
-1. **Exhaustive DFS** up to `max_steps`, for small depths and as the correctness reference.
-2. **Branch-and-bound best-first / beam search.** It uses a precomputed upper bound `V_k(item)`, the best liquidation value reachable within k steps. This is dynamic programming over the graph where craft edges treat co-ingredients as free, so the bound never underestimates. A node is pruned when `coins + Σ V_{remaining}(inv) ≤ best`. The search also keeps a transposition table on canonical inventory.
-3. **Loop detection:** a sequence that goes coins → coins with gain > 0 using only unlimited-stock purchases is reported as a *repeatable loop*.
+- **Phase 1:** ranks atomic recipes over the sparse item × move table with HiGHS. It checks for free-money loops first, then finds the best recipe and uses Lawler ranking for the top K.
+- **Phase 2:** orders each recipe into the most compact sequence and ranks by growth per action, `ln(1 + gain) / length`.
 
-**Parameters:**
-- `max_steps`, `max_budget`, `beam_width`, `top_n`, `time_limit`.
-- `allowed_move_kinds`, `include_items`, `exclude_items`, `must_use_items`, `target_items` (constrained mode).
-- `leftover_policy` (discard / value at sell price / must liquidate), `min_gain`.
-
-**Output:** the top-N sequences, each with its moves and exact quantities, coins in and out, gain, and a repeatable-loop flag.
-
-**Implementation order:**
-1. A pure-Python reference engine (`python/shimmered_coins/search/`), used for tests and parity checks.
-2. A C++ core (`cpp/`) with the same algorithms, parallelized with OpenMP by splitting the root and sharing the incumbent best score atomically. It's exposed to Python through **nanobind** and built with scikit-build-core and CMake.
-3. Optional **MILP cross-check** using HiGHS (`highspy`) for unlimited mode. Edges become integer activity counts with flow conservation and binary "edge used" variables, `Σ used ≤ max_steps`, and the objective is to maximize net coins. This gives the global optimum as a check on the tree search, and the order of moves is recovered by topological sort.
+The old engine code was deleted. `search/quantize.py` (integer plans and inventory replay) is kept for phase 2.
 
 ## 5. API and UI
 - **FastAPI** (`python/shimmered_coins/api/`) with endpoints:
@@ -118,33 +97,33 @@ Stack decisions:
 ```
 extractor/            C# net48 console (TerrariaExtractor)
 python/shimmered_coins/{data,model,search,api,cli.py}
-cpp/{include,src,bindings}   C++20 core + nanobind module
 web/                  React+TS+Vite
-tests/{python,cpp}    pytest + Catch2; fixtures = tiny hand-made graphs
+tests/                pytest; fixtures = tiny hand-made worlds
 data/                 gitignored per-version DBs
-pyproject.toml, CMakeLists.txt, .github/workflows/ci.yml
+pyproject.toml, .github/workflows/ci.yml
 ```
 
 ## 7. Milestones
 
-**Status (2026-09-24):** milestones 1 and 3–5 are done. Milestone 2 is done against a mock game assembly; `shimcoins data fetch` now downloads a real server zip from terraria.org, runs the extractor and cleans up, but it has not been run against a real build yet (needs Mono on the machine).
+**Status (2026-09-25):**
+- Milestones 1, 2 and 4 are done.
+  - Milestone 2 is done against a mock game assembly. `shimcoins data fetch` downloads a real server zip from terraria.org, runs the extractor and cleans up, but it hasn't been run against a real build yet (needs Mono).
+- Milestone 3 is being redone: the step-by-step engine was removed in favour of [`ALGORITHM.md`](ALGORITHM.md).
 
-Differences from the original plan:
-- The search is a DFS branch-and-bound, not beam search.
-- Negative-gain reporting (`allow_loss`) is Python-only.
-1. Scaffolding: pyproject, CMake, CI (pytest, ruff, clang-format), and a toy-graph fixture.
+1. Scaffolding: pyproject, CI (pytest, ruff), a toy-world fixture.
 2. Extractor and DB build for 1.4.5.8 (current) and 1.4.4.9, plus `data diff`. After that, add the 1.4.0–1.4.3 adapter.
-3. Model and pricing, with the Python reference search and CLI (`shimcoins search --max-steps 4 ...`).
-4. C++ core with parity tests against Python, plus benchmarks.
-5. FastAPI and web UI MVP.
-6. Extras: MILP cross-check, sprite import, happiness calculator.
+3. Search engine, per [`ALGORITHM.md`](ALGORITHM.md) section 10:
+   - phase 1 on HiGHS (free-loop check, best recipe, Lawler top-K);
+   - phase 2 ordering and the length model;
+   - growth-per-action ranking;
+   - `shimcoins search` and the API/UI brought back on it.
+4. FastAPI and web UI MVP.
+5. Extras: sprite import, happiness calculator.
 
 ## 8. Verification
-- Unit tests on interleaved sequences. One example: decraft into A+B+C, craft with A only, then sell B and C. The test checks that the LP uses part of the inventory correctly and computes peak capital correctly.
-- Unit tests on hand-made graphs with known optimal loops: decraft batch remainders, rounding down to whole copper, happiness multipliers, and the rule that pruning never drops the true optimum (DFS vs B&B).
+- The engine tests are listed in [`ALGORITHM.md`](ALGORITHM.md) section 10.
 - Data sanity: spot-check item values and recipes against the wiki, and check that counts per version look reasonable.
 - **Version regression:** reproduce the loops shown in the inspiration video on the early 1.4.4.x data, and confirm they disappear in later patches.
-- Parity: C++ and Python give identical top-N results on random graphs.
 - UI: run it locally, run a search end to end, and check the screenshot.
 
 *Environment note:* the terraria.org and wiki domains are blocked from this cloud sandbox. Extraction has to run on your machine, or those domains need to be added to the environment's network allowlist. Everything else can be built and tested here with the fixture data.

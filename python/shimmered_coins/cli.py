@@ -13,7 +13,6 @@ from .data.fetch import FetchError
 from .data.schema import Dataset
 from .model import ANY_ZONE, KINDS, Constraints, NpcSetup, WorldConfig, build_graph, check_pricing
 from .model.conditions import flag_groups, zones
-from .search import SearchParams, search
 
 _COIN_RE = re.compile(r"(\d+)\s*([pgsc])", re.I)
 _COIN_UNITS = {"p": 1_000_000, "g": 10_000, "s": 100, "c": 1}
@@ -160,59 +159,15 @@ def cmd_search(a: argparse.Namespace) -> int:
         exclude_items=_items(ds, a.exclude),
     )
     g = build_graph(ds, world, npcs, cons)
-    params = SearchParams(
-        max_steps=a.max_steps,
-        top_n=a.top,
-        leftover=a.leftover,
-        min_gain=a.min_gain,
-        allow_loss=a.allow_loss,
-        must_use=_items(ds, a.must_use),
-        start_items=_items(ds, a.start) if a.start else None,
-        exhaustive=a.exhaustive,
-        budget=a.budget,
-        max_nodes=a.max_nodes,
-        time_limit=a.time_limit,
-    )
-    rep = search(g, params)
-    if a.json:
-        print(
-            json.dumps(
-                {
-                    "version": ds.version,
-                    "stats": rep.stats.__dict__,
-                    "results": [
-                        {
-                            "gain": r.gain,
-                            "lp_gain": r.lp_gain,
-                            "capital": r.capital,
-                            "profit": r.profit,
-                            "repeatable": r.repeatable,
-                            "moves": [
-                                {"kind": m.transform.kind, "batches": m.batches, "text": m.text}
-                                for m in r.moves
-                            ],
-                            "leftover": {g.name(i): c for i, c in r.leftover.items()},
-                        }
-                        for r in rep.results
-                    ],
-                },
-                indent=2,
-            )
-        )
-        return 0
-    s = rep.stats
+    # The step-by-step tree search was removed; the recipe-based engine (docs/ALGORITHM.md)
+    # replaces it. Until it lands, report what the search would work on.
     print(
-        f"{ds.version}: {len(g.transforms)} moves available; searched {s.nodes} nodes "
-        f"({s.pruned} pruned, {s.lp_solves} LPs) in {s.elapsed:.2f}s"
-        + ("" if s.complete else "  [stopped early: limit reached]")
+        f"{ds.version}: {len(g.transforms)} moves available for this world and NPC setup.\n"
+        "The search engine is being rebuilt around recipes (see docs/ALGORITHM.md); "
+        "'shimcoins search' will return results again once phase 1 lands.",
+        file=sys.stderr,
     )
-    if not rep.results:
-        print(
-            "no sequence found" + ("" if a.allow_loss else " with positive gain (try --allow-loss)")
-        )
-    for k, r in enumerate(rep.results, 1):
-        print(f"\n#{k} {r.summary(g)}")
-    return 0
+    return 3
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
