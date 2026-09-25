@@ -172,6 +172,7 @@ namespace Terraria
     {
         public ShoppingSettings currentShoppingSettings = new ShoppingSettings { PriceAdjustment = 1 };
         public int golferScoreAccumulated;
+        public bool discountAvailable;
         public bool ZoneSnow { get; set; }
         public bool ZoneDesert { get; set; }
         public bool ZoneOverworldHeight { get; set; }
@@ -180,7 +181,9 @@ namespace Terraria
         public void GetItemExpectedPrice(Item item, out long calcForSelling, out long calcForBuying)
         {
             float adj = Main.ShopHelper.GetShoppingSettings_Adjustment();
-            calcForBuying = (long)Math.Round(item.value * adj);
+            long buy = item.value;
+            if (discountAvailable) buy = (long)(buy * 0.8);
+            calcForBuying = (long)Math.Round(buy * adj);
             calcForSelling = (long)Math.Round(item.value / adj);
         }
     }

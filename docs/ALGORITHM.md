@@ -10,7 +10,7 @@ The engine works in two phases:
    quantities, ignoring order and effort. This is linear programming over a sparse table, solved
    with HiGHS.
 2. **Phase 2 – how to do it.** For each top recipe, find the most compact executable sequence and
-   its length. Rank by growth per action.
+   its length (the number of places visited). Rank by growth per trip.
 
 ---
 
@@ -18,7 +18,8 @@ The engine works in two phases:
 
 **Rows** are items. **Columns** are concrete moves ("transforms"):
 
-- **buy X** from the cheapest NPC offering it. There's one column per item.
+- **buy X from NPC n.** There's one column per (item, NPC) offer, so phase 2 can prefer an NPC
+  already on the tour.
 - **craft recipe R.** There's one column per concrete ingredient variant, so "any wood" becomes one
   column per wood.
 - **shimmer X → outputs.** There's one column per outcome allowed in the current world.
@@ -168,16 +169,47 @@ Every user constraint is a bound or a row:
 - **first purchase in S:** drop the other buy columns;
 - **limited stock** (Travelling Merchant): upper bound on the buy column. The recipe is then
   flagged *one-shot*, because it can't be repeated or compounded.
-- **cap on the number of moves:** binary `z_t ≥ v_t / M` and `Σz ≤ L` makes it a MILP, still in
-  HiGHS. Alternatively, Lawler already produces recipes best-first, so long ones can be filtered
-  out.
+- **cap on places visited:** binary visit variables make it a MILP, still in HiGHS (6.2).
 
 ## 5. Phase 2: ordering and length
 
-**Recipes without cycles.** If the items and moves in a recipe form no cycle, run each move **once,
-at full quantity, in dependency order**: all buys → crafts/shimmers topologically → sell all.
-Inventory never goes negative, because every producer of an item runs before any consumer and
-`N·v ≥ 0`. `search/quantize.simulate` replays the integer plan to verify this.
+### Cost model
+Only **travel** costs anything. Clicking, holding the mouse and hovering are free: holding the
+mouse to buy or craft 100 of something is the same effort as one.
+
+Assumptions (agreed):
+
+- **Crafting is free anywhere.** The player uses pylons, Recall or a Magic Mirror, so every crafting
+  station is one click away.
+- **Selling happens at the happiest NPC present**, the one with the best sell price
+  (`NpcSetup.best_sell_adjustment`).
+- **Each distinct place visited costs 1** (weights configurable later if needed).
+
+The places a loop can visit are the NPCs it buys from, the shimmer pool (only if it shimmers), and
+the happiest NPC, to sell. Crafts need no place of their own, since they happen wherever the
+player stands. That includes the pool, so **all crafts and shimmers fit in one pool visit**, however
+they interleave.
+
+### Length
+A repeatable loop is a closed tour, so its length is the number of distinct places in it:
+
+`L = |{NPCs bought from} ∪ {happiest NPC} ∪ {pool, if the recipe shimmers}|`
+
+| loop | L |
+|---|---|
+| buy at Merchant, craft, sell to Merchant (the happiest) | 1 |
+| buy at Merchant, shimmer, sell to Merchant | 2 (Merchant, pool) |
+| buy at Arms Dealer and Merchant, shimmer, sell to Dryad | 4 |
+
+`L` is a small integer and depends only on the support, so phase 1 can use it directly (6.2).
+
+### Order
+All buys (grouped by NPC) → travel to the pool → crafts and shimmers → travel to the happiest NPC
+→ sell all. If the happiest NPC is also a seller, the loop starts and ends there.
+
+**Inside the pool visit**, moves run in dependency order, each once at full quantity. Inventory
+never goes negative, because every producer of an item runs before any consumer and `N·v ≥ 0`.
+`search/quantize.simulate` replays the integer plan to verify this.
 
 R1 in order:
 
@@ -189,36 +221,66 @@ R1 in order:
 | craft Ring | 0 | 0 | 0 | 1 | −500 |
 | sell all | 0 | 0 | 0 | 0 | +3500 |
 
-**Recipes with cycles** (e.g. X → Y by shimmer, Y → X by craft) can balance on paper but need X
-before any X exists. Phase 2 has to either:
+**Cycles** (e.g. X → Y by shimmer, Y → X by craft) run in rounds at the pool. Rounds are free,
+since they need no travel. A cycle still needs a first unit of X. If no move outside the cycle
+produces an item of it:
 
-- seed the cycle (buy the missing items, if possible), or
-- run it in rounds, or
-- reject the recipe.
+- **seed:** buy that unit once and keep it for later loops, because a balanced cycle gives it
+  back; or
+- **reject** the recipe if nothing in the cycle can be bought.
 
-**This is an open decision** (section 9).
-
-**Length.** A move repeated back to back counts once: holding the mouse to craft 100 of something
-is one action. For a recipe without cycles:
-
-`L = Σ_{t ∈ supp} w(kind_t) + w(sell)`
-
-- `w` is a configurable weight per action kind (buy, craft, shimmer, sell), default 1.
-- **The exact compression rules are still to be supplied by the user.** They live in a single
-  `LengthModel` and nothing else depends on them.
+### Buying from a pricier NPC
+One column per (item, NPC) replaces "cheapest offer only". Buying from a slightly pricier NPC who
+is already in the tour, such as the seller, can remove a whole trip and raise the score.
 
 ## 6. Ranking
 
-**rate = ln(1 + gain) / L**, the growth per action when the loop is repeated and its proceeds
-reinvested.
+### 6.1 Score
+**Pending the user's choice.**
 
-- 2× in 5 actions (rate 0.139, ×1.149 per action) beats 2.5× in 15 actions (rate 0.061).
-- Repeating a loop k times doesn't change its rate.
-- Phase 1 ranks by gain, so it generates K' > K candidates. Phase 2 computes `L` for each, and the
-  final list is sorted by rate.
-- The move-count-capped MILP (4.4), run for s = 1, 2, …, gives the Pareto front of gain vs length,
-  on which the best rate always lies.
-- One-shot recipes are shown with their rate, labelled as not repeatable.
+- The first proposal was `ln(1 + gain) / L`: exact growth per trip if proceeds are reinvested
+  forever, but it felt too harsh on longer loops.
+- The recommended score adds a per-loop overhead `c`:
+
+  **score = ln(1 + gain) / (L + c)**
+
+  - `c` is the fixed effort of running a loop at all: opening the inventory, walking to storage,
+    teleporting home, and similar. It's a user setting.
+  - `c = 0` gives pure compounding. A large `c` ranks by gain alone.
+  - Repeating a loop k times doesn't change its score, as it should: k·ln(1+g) / k(L+c).
+- `(1 + gain) / √L` was rejected. It rewards getting the stake back: a break-even loop with L = 1
+  scores 1.0 and beats +30% with L = 2 (0.92). It also isn't stable under repetition.
+
+Results report gain, `L`, and the score as "×m per trip", where `m = exp(score)`. One-shot recipes
+(limited stock) are shown with their score, labelled as not repeatable.
+
+### 6.2 Using L in phase 1
+Any score that rises with gain and falls with `L` is maximized on the gain-vs-`L` Pareto front.
+`L` counts places, so:
+
+- add a binary "visits place q" per NPC and for the pool;
+- for each column, require that its place is visited (for example `v_t ≤ M·y_q`);
+- solve "best gain with `L ≤ 1, 2, 3, …`" as a MILP in HiGHS. Each gives one front point.
+
+Lawler top-K (4.3) runs inside each `L` level. The final list is sorted by score. The score's
+formula only affects this final sort, so changing it needs no re-solve.
+
+### 6.3 Neutral catalogue (optional, per version)
+A precomputed top list that the UI can show before any setup is entered. It covers:
+
+- all shop NPCs present at neutral happiness, in any biome;
+- one scenario per progression stage × world evil, about 20 scenarios.
+
+Neutral happiness loses nothing. If every NPC shares one adjustment `a`, buys scale by `a` and sells
+by `1/a`, so the gain ranking is unchanged. Only the numbers rescale.
+
+| per version | top 100 per scenario | top 1,000 per scenario |
+|---|---|---|
+| time | ≈ 80 s single-threaded, ≈ 25 s on 4 cores | ≈ 10 min, ≈ 3 min on 4 cores |
+| space | ≈ 0.2 MB | ≈ 2 MB |
+
+Default: top 100, stored next to the version's `db.sqlite`. These estimates come from the synthetic
+benchmark (section 8).
 
 ## 7. Tooling
 
@@ -252,12 +314,23 @@ Estimate for real data:
 - top-50 ≈ 300 re-solves ≈ 2 s single-threaded.
 
 ## 9. Open questions
-1. **Recipes with cycles** in phase 2: seed, run in rounds, or reject?
-2. **Length compression rules.** Pending from the user. `LengthModel` is the only place they go.
-3. **Buying the same item from several NPCs.** It is one column today (cheapest offer). Should
-   stock limits split it?
-4. **Numerical tolerances** for support detection (`v_t > ε`) with prices spanning 1 to 10⁷ copper.
+1. **Score formula** (6.1): `ln(1 + gain) / (L + c)` recommended, with the default `c` to be
+   agreed.
+2. **Travel cost between places.** Each place counts 1 for now. Per-place weights, for example
+   NPCs without a pylon nearby, can come later.
+3. **Numerical tolerances** for support detection (`v_t > ε`) with prices spanning 1 to 10⁷ copper.
    Scale columns by price.
+
+Settled:
+
+- movement-only cost;
+- all crafting stations one click away;
+- sell at the happiest NPC;
+- cycles run in rounds at the pool (seed or reject);
+- one buy column per (item, NPC);
+- the Discount Card / Greedy Ring: −20% on buys, applied before happiness, and not stacking. The
+  extractor's pricing probe records samples with and without it, so `shimcoins data info` checks
+  the formula against the real game (`discount_match_rate`).
 
 ## 10. Implementation plan
 1. **Dependencies:** add `highspy` to the package. `scipy` stays (sparse).
@@ -271,14 +344,14 @@ Estimate for real data:
    - constraints (4.4);
    - integer form via `quantize`.
 4. **`search/schedule.py`:**
-   - dependency-order schedule for recipes without cycles, checked with `simulate`;
-   - cycle detection, which flags the recipe until the open question is settled;
-   - `LengthModel` with per-kind weights;
-   - rate.
+   - tour: places visited, `L`, the order buys → pool → sell;
+   - dependency-order schedule inside the pool visit, checked with `simulate`;
+   - cycles: rounds, seed, or reject;
+   - score (6.1).
 5. **CLI / API / UI:**
    - bring `shimcoins search` and `POST /api/search` back on the new engine;
-   - options: `--top`, `--weight kind=w`, `--max-moves`, constraints as today;
-   - show gain, length and rate per recipe, plus loop warnings;
+   - options: `--top`, `--overhead c`, `--max-places`, constraints as today;
+   - show gain, `L` and score per recipe, plus loop warnings;
    - the UI result card shows the ordered steps and the "sell all" residue.
 6. **Tests:**
    - the toy world gives R1 (+7.0) as the best recipe;
@@ -287,6 +360,8 @@ Estimate for real data:
    - Lawler top-K has no duplicate supports and ranks by gain;
    - decomposition returns atomic parts;
    - schedule replay never goes negative;
-   - rate ranking puts the A-vs-B example the right way round;
+   - `L` counts places (the three examples in section 5);
+   - score ranking puts the A-vs-B example the right way round;
    - a performance smoke test on the synthetic 5,500 × 9,400 model.
-7. **Docs:** README usage, and this file updated as questions get settled.
+7. **Catalogue:** `shimcoins data catalogue <version>` (6.3).
+8. **Docs:** README usage, and this file updated as questions get settled.

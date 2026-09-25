@@ -641,8 +641,9 @@ static partial class Program
     }
 
     // ------------------------------------------------------------------ pricing probe --------
-    // Records what Player.GetItemExpectedPrice returns for a few happiness adjustments so the
-    // Python side can check its pricing formula against the real game.
+    // Records what Player.GetItemExpectedPrice returns for a few happiness adjustments, with and
+    // without the Discount Card / Greedy Ring flag, so the Python side can check its pricing
+    // formula (including the discount's rounding and order) against the real game.
 
     static void PricingProbe(Json j)
     {
@@ -651,11 +652,16 @@ static partial class Program
         var adjField = helper.GetType().GetFields(INST).FirstOrDefault(f => f.FieldType == typeof(float)
             && f.Name.ToLowerInvariant().Contains("priceadjustment"));
         var m = player.GetType().GetMethod("GetItemExpectedPrice", ANY);
+        // Bool members like discountAvailable / discountEquipped; set together, whatever the version.
+        var discountFields = player.GetType().GetFields(INST)
+            .Where(f => f.FieldType == typeof(bool) && f.Name.ToLowerInvariant().Contains("discount")).ToList();
         var probeList = new List<string>();
+        foreach (var discount in discountFields.Count > 0 ? new[] { false, true } : new[] { false })
         foreach (var adj in new[] { 0.75f, 0.9f, 1.0f, 1.12f, 1.5f })
         {
             foreach (var value in new[] { 1, 7, 100, 12345, 5000000 })
             {
+                foreach (var f in discountFields) f.SetValue(player, discount);
                 adjField.SetValue(helper, adj);
                 var item = NewItem(1);
                 Set(item, "value", value);
@@ -670,6 +676,7 @@ static partial class Program
                     if (pn.Contains("sell")) sell = argv[i]; else if (pn.Contains("buy")) buy = argv[i];
                 }
                 probeList.Add("{\"adjustment\":" + adj.ToString(CultureInfo.InvariantCulture) + ",\"value\":" + value
+                    + ",\"discount\":" + (discount ? "true" : "false")
                     + ",\"sell\":" + (sell ?? "null") + ",\"buy\":" + (buy ?? "null") + "}");
             }
         }

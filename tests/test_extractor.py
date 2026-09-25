@@ -10,7 +10,7 @@ import pytest
 from conftest import ROOT
 from shimmered_coins.cli import main
 from shimmered_coins.data import load_dataset
-from shimmered_coins.model import SHIMMER, NpcSetup, WorldConfig, build_graph
+from shimmered_coins.model import SHIMMER, NpcSetup, WorldConfig, build_graph, check_pricing
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which("mcs") and shutil.which("mono")), reason="mono not installed"
@@ -60,7 +60,11 @@ def test_extracted_dataset(dump):
         ("transmute", 5, ("downedmoonlord",)),
         ("decraft", 6, ("downedboss3",)),
     }
-    assert len(ds.meta["pricing_probe"]) == 25
+    probe = ds.meta["pricing_probe"]
+    assert len(probe) == 50  # 5 adjustments x 5 values, without and with the discount
+    check = check_pricing(probe)
+    assert check["discount_checked"] == 25
+    assert check["discount_match_rate"] is not None
 
 
 def test_modern_shop_conditions(dump):

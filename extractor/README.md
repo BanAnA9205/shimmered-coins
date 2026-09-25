@@ -77,7 +77,8 @@ bestiary completion.
 - **Shimmer rules:** the extractor changes the progression flags and world evil, and records which
   flags change the result.
 - **Pricing:** `pricing_probe` in the metadata stores samples of the game's `GetItemExpectedPrice`
-  at different happiness levels. `shimcoins data info` compares them with the engine's formula.
+  at different happiness levels, with and without the Discount Card flag. `shimcoins data info`
+  compares them with the engine's formula (`buy_match_rate`, `discount_match_rate`).
 
 `--legacy-shops` forces the pre-1.4.4 shop path, which is useful for debugging.
 
