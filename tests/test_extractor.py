@@ -1,4 +1,4 @@
-"""End-to-end: compile the extractor and a mock game assembly, extract, build, search.
+"""End-to-end: compile the extractor and a mock game assembly, extract, build, load.
 
 Needs Mono (`mcs` + `mono`); skipped otherwise.
 """
@@ -137,5 +137,5 @@ def test_cli_pipeline(dump, tmp_path, capsys):
     db = tmp_path / "db.sqlite"
     assert main(["data", "build", str(dump), "--out", str(db)]) == 0
     assert load_dataset(db).condition_info("zone:snow").description == "In Snow"
-    assert main(["search", str(db), "--npc", "Merchant", "--allow-loss", "--max-steps", "3"]) == 0
-    assert "9.9.9.9" in capsys.readouterr().out
+    assert main(["search", str(db), "--npc", "Merchant"]) == 3
+    assert "9.9.9.9" in capsys.readouterr().err

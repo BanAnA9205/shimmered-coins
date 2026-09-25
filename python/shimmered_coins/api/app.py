@@ -19,8 +19,7 @@ from pydantic import BaseModel, Field
 from ..data import Dataset, load_dataset
 from ..model import ANY_ZONE, KINDS, Constraints, NpcSetup, WorldConfig, build_graph
 from ..model.conditions import flag_groups, zones
-from ..model.graph import Graph, Transform, format_coins
-from ..search import SearchParams, search
+from ..model.graph import Graph, Transform
 
 DEMO = Path(__file__).resolve().parent.parent / "demo" / "toy_world.json"
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -173,42 +172,11 @@ def create_app() -> FastAPI:
                 exclude_items=frozenset(req.exclude),
             ),
         )
-        rep = search(
-            g,
-            SearchParams(
-                max_steps=req.max_steps,
-                top_n=req.top_n,
-                leftover=req.leftover,
-                min_gain=req.min_gain,
-                allow_loss=req.allow_loss,
-                must_use=frozenset(req.must_use),
-                start_items=frozenset(req.start) if req.start is not None else None,
-                budget=req.budget,
-                max_nodes=req.max_nodes,
-                time_limit=req.time_limit,
-            ),
+        raise HTTPException(
+            503,
+            f"The search engine is being rebuilt around recipes (docs/ALGORITHM.md). "
+            f"This setup has {len(g.transforms)} moves available.",
         )
-        return {
-            "version": ds.version,
-            "moves_available": len(g.transforms),
-            "stats": vars(rep.stats),
-            "results": [
-                {
-                    "gain": r.gain,
-                    "lp_gain": float(r.lp_gain),
-                    "capital": r.capital,
-                    "capital_text": format_coins(r.capital),
-                    "profit": r.profit,
-                    "profit_text": format_coins(r.profit),
-                    "repeatable": r.repeatable,
-                    "moves": [_move_json(g, m.transform, m.batches, m.text) for m in r.moves],
-                    "leftover": [
-                        {"id": i, "name": g.name(i), "count": c} for i, c in r.leftover.items()
-                    ],
-                }
-                for r in rep.results
-            ],
-        }
 
     if WEB_DIST.is_dir():
         app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
