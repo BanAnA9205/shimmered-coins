@@ -77,6 +77,7 @@ static partial class Program
         Section("recipes", j, () => Recipes(j));
         Section("npcs+shops", j, () => NpcsAndShops(j, forceLegacy));
         Section("shimmer", j, () => Shimmer(j));
+        Section("drops", j, () => Drops(j));
         WriteCatalog(j);
         j.End();
 
@@ -797,6 +798,83 @@ static partial class Program
             }
         }
         j.Key("pricing_probe").Raw("[" + string.Join(",", probeList) + "]");
+    }
+
+    // ------------------------------------------------------------------ npc drops -------------
+
+    static void Drops(Json j)
+    {
+        // The game's own loot tables, evaluated via IItemDropRule.ReportDroprates: every
+        // (item, stack range, rate, conditions) the rule can produce, exactly as the game
+        // computes them for the bestiary UI.
+        var mainT = T("Terraria.Main");
+        object db = GetStatic(mainT, "ItemDropsDB");
+        if (db == null)
+        {
+            // The game populates ItemDropsDB during Main init; ours never got that far.
+            db = Activator.CreateInstance(T("Terraria.GameContent.ItemDropRules.ItemDropDatabase"));
+            mainT.GetField("ItemDropsDB", STATIC).SetValue(null, db);
+            Try("ItemDropDatabase.Populate", () => CallInst(db, "Populate"));
+        }
+
+        var getRules = db.GetType().GetMethod("GetRulesForNPCID");
+        var report = T("Terraria.GameContent.ItemDropRules.IItemDropRule").GetMethod("ReportDroprates");
+        var infoType = T("Terraria.GameContent.ItemDropRules.DropRateInfo");
+        var fItem = infoType.GetField("itemId");
+        var fMin = infoType.GetField("stackMin");
+        var fMax = infoType.GetField("stackMax");
+        var fRate = infoType.GetField("dropRate");
+        var fConds = infoType.GetField("conditions");
+        // 1.4.5 conditions are bare predicates (no Description member): record the class
+        // name; the Python side maps the known ones (NotExpert -> "!expert", etc.)
+
+        int npcCount = Convert.ToInt32(GetStatic("Terraria.ID.NPCID", "Count"));
+        j.Key("npc_drops").Arr();
+        int rulesTotal = 0, npcsWithDrops = 0;
+        for (int npc = -80; npc < npcCount; npc++)
+        {
+            IEnumerable rules = null;
+            try { rules = getRules.Invoke(db, new object[] { npc, false }) as IEnumerable; }
+            catch { continue; }
+            if (rules == null) continue;
+            var ruleList = new List<object>();
+            foreach (var r in rules) ruleList.Add(r);
+            if (ruleList.Count == 0) continue;
+            var infos = Activator.CreateInstance(typeof(List<>).MakeGenericType(infoType));
+            var feed = Activator.CreateInstance(
+                T("Terraria.GameContent.ItemDropRules.DropRateInfoChainFeed"),
+                new object[] { 1f });  // root chance: rules multiply by the feed's rate
+            foreach (var rule in ruleList)
+            {
+                try { report.Invoke(rule, new object[] { infos, feed }); rulesTotal++; }
+                catch (Exception e) { Warn("drops npc " + npc + ": " + Inner(e).Message); }
+            }
+            var buf = new List<string>();
+            foreach (var info in (IEnumerable)infos)
+            {
+                int item = Convert.ToInt32(fItem.GetValue(info));
+                if (item <= 0) continue;
+                int mn = Convert.ToInt32(fMin.GetValue(info));
+                int mx = Convert.ToInt32(fMax.GetValue(info));
+                float rate = (float)fRate.GetValue(info);
+                var conds = fConds.GetValue(info) as IEnumerable;
+                var cdescs = new List<string>();
+                if (conds != null)
+                    foreach (var c in conds)
+                        cdescs.Add(c.GetType().Name);
+                buf.Add("{\"item\":" + item + ",\"min\":" + mn + ",\"max\":" + mx
+                    + ",\"rate\":" + rate.ToString(CultureInfo.InvariantCulture)
+                    + ",\"conditions\":[" + string.Join(",", System.Linq.Enumerable.Select(cdescs, Json.Quote)) + "]}");
+            }
+            if (buf.Count == 0) continue;
+            npcsWithDrops++;
+            j.Obj();
+            j.Key("npc").Val(npc);
+            j.Key("drops").Raw("[" + string.Join(",", buf) + "]");
+            j.End();
+        }
+        j.End();
+        Log("npc drops: " + npcsWithDrops + " npcs, " + rulesTotal + " rules");
     }
 
     // ------------------------------------------------------------------ probe mode -----------

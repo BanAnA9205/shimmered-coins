@@ -31,6 +31,10 @@ CREATE TABLE shimmer (
     outputs TEXT NOT NULL, conditions TEXT NOT NULL);
 CREATE INDEX shimmer_item ON shimmer(item);
 CREATE TABLE npcs (id INTEGER PRIMARY KEY, name TEXT NOT NULL, has_shop INTEGER NOT NULL);
+CREATE TABLE npc_drops (
+    npc INTEGER NOT NULL, item INTEGER NOT NULL, rate REAL NOT NULL,
+    min INTEGER NOT NULL, max INTEGER NOT NULL, conditions TEXT NOT NULL,
+    PRIMARY KEY (npc, item, min, max, conditions));
 CREATE TABLE conditions (
     name TEXT PRIMARY KEY, scope TEXT NOT NULL, description TEXT NOT NULL, depends TEXT NOT NULL);
 """
@@ -98,6 +102,14 @@ def save(ds: Dataset, path: str | Path) -> None:
         con.executemany(
             "INSERT INTO npcs VALUES (?,?,?)",
             [(n.id, n.name, int(n.has_shop)) for n in ds.npcs.values()],
+        )
+        con.executemany(
+            "INSERT INTO npc_drops VALUES (?,?,?,?,?,?)",
+            [
+                (npc, x.item, x.rate, x.min, x.max, json.dumps(list(x.conditions)))
+                for npc, lst in ds.drops
+                for x in lst
+            ],
         )
         con.executemany(
             "INSERT INTO conditions VALUES (?,?,?,?)",
@@ -179,11 +191,41 @@ def load(path: str | Path) -> Dataset:
                 {"id": r[0], "name": r[1], "has_shop": bool(r[2])}
                 for r in con.execute("SELECT * FROM npcs ORDER BY id")
             ],
+            "npc_drops": [
+                {
+                    "npc": npc,
+                    "drops": [
+                        {
+                            "item": item,
+                            "rate": rate,
+                            "min": mn,
+                            "max": mx,
+                            "conditions": json.loads(conds),
+                        }
+                        for item, rate, mn, mx, conds in rows
+                    ],
+                }
+                for npc, rows in _drops_by_npc(con)
+            ],
             "conditions": _conditions(con),
         }
     finally:
         con.close()
     return Dataset.from_dict(d)
+
+
+def _drops_by_npc(con: sqlite3.Connection):
+    current, rows = None, []
+    for npc, item, rate, mn, mx, conds in con.execute(
+        "SELECT npc, item, rate, min, max, conditions FROM npc_drops ORDER BY npc, item"
+    ):
+        if npc != current:
+            if current is not None:
+                yield current, rows
+            current, rows = npc, []
+        rows.append((item, rate, mn, mx, conds))
+    if current is not None:
+        yield current, rows
 
 
 def _conditions(con: sqlite3.Connection) -> list[dict]:

@@ -245,6 +245,88 @@ def cmd_search(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_world(a: argparse.Namespace) -> int:
+    from .data.world import parse_world
+
+    path = Path(a.path)
+    if not path.is_file():
+        print(f"no such file: {path}", file=sys.stderr)
+        return 2
+    try:
+        w = parse_world(path)
+    except ValueError as e:
+        print(f"world: {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        print(
+            json.dumps(
+                {
+                    "name": w.name,
+                    "seed": w.seed,
+                    "version": w.version,
+                    "width": w.width,
+                    "height": w.height,
+                    "chests": [
+                        {
+                            "x": c.x,
+                            "y": c.y,
+                            "name": c.name,
+                            "items": [
+                                {"id": i, "prefix": pre, "stack": st} for i, pre, st in c.items
+                            ],
+                        }
+                        for c in w.chests
+                        if c.items or c.name
+                    ],
+                    "npcs": [
+                        {
+                            "type": n.type,
+                            "name": n.name,
+                            "homeless": n.homeless,
+                            "home_x": n.home_x,
+                            "home_y": n.home_y,
+                        }
+                        for n in w.npcs
+                    ],
+                    "shimmered_types": w.shimmered_types,
+                },
+                indent=2,
+            )
+        )
+        return 0
+    filled = [c for c in w.chests if c.items]
+    total = sum(len(c.items) for c in w.chests)
+    print(
+        f"{w.name!r} (v{w.version}, seed {w.seed!r}) {w.width}x{w.height}: "
+        f"{len(w.chests)} chests ({len(filled)} with {total} items), {len(w.npcs)} npcs"
+    )
+    for n in w.npcs:
+        npc = _dataset_npc_name(n.type) if a.dataset else None
+        print(
+            f"  npc {n.type:4} {n.name:16} home=({n.home_x},{n.home_y})"
+            + (" homeless" if n.homeless else "")
+            + (f" [{npc}]" if npc else "")
+        )
+    if a.chests:
+        ds = load_dataset(a.dataset) if a.dataset else None
+        for c in filled:
+            print(f"  chest @({c.x},{c.y}) {c.name!r}:")
+            for iid, _prefix, stack in c.items:
+                label = ds.items[iid].name if ds and iid in ds.items else str(iid)
+                print(f"    {stack:5}x {label}")
+    return 0
+
+
+def _dataset_npc_name(type_id: int) -> str | None:
+    from .data import load_dataset as _load
+
+    if not Path("data/1.4.5.8").is_dir():
+        return None
+    ds = _load("data/1.4.5.8")
+    n = ds.npcs.get(type_id)
+    return n.name if n else None
+
+
 def cmd_sprites(a: argparse.Namespace) -> int:
     from .data.sprites import find_game_installs, import_sprites
 
@@ -375,6 +457,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--time-limit", type=float, default=30.0)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_search)
+
+    wp = sub.add_parser("world", help="parse a .wld world: chests, NPCs, metadata")
+    wp.add_argument("path", help="path to the .wld file")
+    wp.add_argument("--json", action="store_true", help="machine-readable output")
+    wp.add_argument("--chests", action="store_true", help="list every filled chest's contents")
+    wp.add_argument(
+        "--dataset", help="dataset for item/NPC names (e.g. data/1.4.5.8)", default=None
+    )
+    wp.set_defaults(func=cmd_world)
 
     sp = sub.add_parser(
         "sprites", help="import item art from your Terraria install (auto-detected)"
