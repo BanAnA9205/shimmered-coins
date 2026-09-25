@@ -13,9 +13,9 @@ Early MVP. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
 
 - [x] Dataset schema, SQLite storage, curation overrides, version diff ([`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md))
 - [x] Move graph: buy / sell / craft / shimmer, with NPC happiness pricing and world conditions
-- [x] Extractor for real game data (reads `TerrariaServer.exe`), see [`extractor/README.md`](extractor/README.md). `shimcoins data fetch` downloads a server build and runs it.
+- [x] Extractor for real game data (reads `TerrariaServer.exe`), see [`extractor/README.md`](extractor/README.md). `shimcoins data fetch` downloads a server build and runs it. Verified against a real 1.4.5.8 extraction: `data/1.4.5.8/db.sqlite`.
 - [x] Web UI (local, Terraria-style): `shimcoins serve`
-- [ ] **Search engine: being rebuilt.** The first version searched move sequences step by step; it was removed in favour of the recipe-based design in [`docs/ALGORITHM.md`](docs/ALGORITHM.md). Phase 1 uses LPs over recipes with HiGHS; phase 2 orders each recipe and ranks by growth per action. Until it lands, `shimcoins search` and the UI's Search button report the size of the move graph instead of results.
+- [x] Search engine, recipe-based ([`docs/ALGORITHM.md`](docs/ALGORITHM.md)): HiGHS LPs over the item × move table find atomic recipes (with free-loop detection and Lawler top-K); phase 2 orders each into a tour and ranks by growth per trip. Works on real data.
 
 # Quick start
 
@@ -27,8 +27,11 @@ pytest
 shimcoins data fetch           # picks a version, confirms, cleans up after itself
 shimcoins data info data/1.4.5.8
 
+# search it
+shimcoins search data/1.4.5.8 --all-npcs 0.75 --flag hardmode --top 5
+
 # the bundled toy world (invented data) works everywhere a dataset does
-shimcoins data info python/shimmered_coins/demo/toy_world.json
+shimcoins search python/shimmered_coins/demo/toy_world.json --all-npcs 1 --flag downedBoss
 ```
 
 ## Web UI
@@ -42,7 +45,11 @@ shimcoins serve            # http://127.0.0.1:8765, datasets from ./data (plus t
 For UI development, run `npm run dev` inside `web/` while `shimcoins serve` is running. The dev server proxies `/api` to it.
 
 - **Font:** put a Terraria-style font at `web/public/fonts/terraria.ttf`. It's gitignored and used automatically.
-- **Item sprites:** `web/public/sprites/Item_<id>.png`, also gitignored.
+- **Item sprites:** the UI's **Sprites** tab scans for your Terraria/tModLoader install
+  automatically (or `shimcoins sprites` on the CLI) and imports the game's `Item_*.xnb` art —
+  XNA LZX and MonoGame LZ4 XNBs both decode — into `web/public/sprites/`. Set
+  `$SHIMCOINS_TERRARIA` if Steam lives somewhere unusual. Sprites are Re-Logic's art: they stay
+  local and gitignored.
 
 ## How the search works
 
@@ -50,12 +57,13 @@ See [`docs/ALGORITHM.md`](docs/ALGORITHM.md). In short:
 
 - **Phase 1:** moves form a sparse item × move table. The search finds the best *atomic
   recipes*: buy/craft/shimmer quantities that can't be split into smaller profitable pieces. It
-  solves linear programs with HiGHS instead of walking move sequences.
+  solves linear programs with HiGHS instead of walking move sequences. Free-money loops
+  (duplication exploits) are detected first and reported separately.
 - **Phase 2:** each top recipe becomes a tour: buy at each NPC, one shimmer-pool visit for every
   craft and shimmer, sell all at the happiest NPC. Only travel counts: `L` = places visited.
-- **Ranking:** by growth per trip. The exact score is still being settled (ALGORITHM.md 6.1).
+- **Ranking:** by growth per trip, `score = ln(1 + gain) / (L + c)` with the `--overhead` `c`.
 
-The options below describe the world and NPC setup. They already work and will feed the new engine:
+The options below describe the world and NPC setup:
 
 | option | effect |
 |--------|--------|
@@ -64,4 +72,8 @@ The options below describe the world and NPC setup. They already work and will f
 | `--all-npcs 1` | every shop NPC present at the given adjustment |
 | `--flag hardmode` | world flags (progression, world evil, events, ...) |
 | `--include`, `--exclude`, `--must-use`, `--start` | constrained search on specific items |
-| `--kinds craft,shimmer` | allowed move kinds |
+| `--kinds craft,shimmer` | allowed move kinds (selling is always implicit) |
+| `--top N`, `--overhead C`, `--max-places K` | how many recipes, the score's per-loop overhead, and a cap on tour length |
+| `--allow-loss` | also report the least-bad recipes when nothing is profitable |
+| `--wallet "50g"` | drop recipes you can't afford, scale the rest to your wallet |
+| `--json` | machine-readable output |

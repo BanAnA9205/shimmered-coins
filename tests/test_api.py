@@ -28,11 +28,16 @@ def test_datasets_and_info(client):
     assert client.get("/api/datasets/nope").status_code == 404
 
 
-def test_search_is_offline_until_recipe_engine(client):
-    body = {"dataset": "demo", "npcs": {"1": 1.0, "2": 1.0}}
+def test_search_returns_recipes(client):
+    body = {"dataset": "demo", "npcs": {"1": 1.0, "2": 1.0}, "flags": ["downedboss"]}
     res = client.post("/api/search", json=body)
-    assert res.status_code == 503
-    assert "ALGORITHM.md" in res.json()["detail"]
+    assert res.status_code == 200
+    d = res.json()
+    assert d["stats"]["solves"] > 0 and d["loops"] == []
+    top = d["results"][0]
+    assert top["gain"] == pytest.approx(7.0)
+    assert top["length"] == 2 and top["places"] == ["Smith", "shimmer pool"]
+    assert top["moves"][-1]["kind"] == "sell"
     assert client.post("/api/search", json={**body, "npcs": {}}).status_code == 400
 
 

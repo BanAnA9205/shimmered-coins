@@ -33,6 +33,8 @@ namespace Terraria.Localization
 
 namespace Terraria
 {
+    using System.Collections.Generic;
+
     public static class Main
     {
         public static bool dedServ;
@@ -47,6 +49,21 @@ namespace Terraria
         public static string versionNumber = "v9.9.9.9";
         public static Recipe[] recipe = new Recipe[10];
         public static GameContent.ShopHelper ShopHelper = new GameContent.ShopHelper();
+        public static bool expertMode;
+        public static GameContent.ItemDropRules.ItemDropDatabase ItemDropsDB = new GameContent.ItemDropRules.ItemDropDatabase();
+        static Main()
+        {
+            ItemDropsDB.rules[1] = new List<GameContent.ItemDropRules.IItemDropRule>
+            {
+                new GameContent.ItemDropRules.CommonDrop(23, 2, 1, 3),
+                new GameContent.ItemDropRules.CommonDrop(1309, 400, 1, 1),
+            };
+            ItemDropsDB.rules[17] = new List<GameContent.ItemDropRules.IItemDropRule>
+            {
+                new GameContent.ItemDropRules.CommonDrop(4, 1, 1, 1)
+                    .With(new GameContent.ItemDropRules.IsExpertCondition()),
+            };
+        }
     }
 
     public class NPC
@@ -177,14 +194,15 @@ namespace Terraria
         public bool ZoneDesert { get; set; }
         public bool ZoneOverworldHeight { get; set; }
 
-        // Mirrors the real signature; the mock formula is deliberately simple.
+        // A literal port of the real Player.GetItemExpectedPrice (1.4.5.8): float32 math,
+        // the discount truncates value*0.8f before happiness, Math.Round is half-to-even.
         public void GetItemExpectedPrice(Item item, out long calcForSelling, out long calcForBuying)
         {
             float adj = Main.ShopHelper.GetShoppingSettings_Adjustment();
             long buy = item.value;
-            if (discountAvailable) buy = (long)(buy * 0.8);
-            calcForBuying = (long)Math.Round(buy * adj);
-            calcForSelling = (long)Math.Round(item.value / adj);
+            if (discountAvailable) buy = (int)(buy * 0.8f);
+            calcForBuying = (long)(int)Math.Round((double)(buy * adj));
+            calcForSelling = (long)(int)Math.Round((double)(item.value / adj));
         }
     }
 
@@ -277,6 +295,72 @@ namespace Terraria.GameContent
             if (type == 6) return !NPC.downedBoss3;  // chest decraft needs Skeletron
             if (type == 5) return !NPC.downedMoonlord;  // lead bar -> iron bar needs Moon Lord
             return false;
+        }
+    }
+}
+
+namespace Terraria.GameContent.ItemDropRules
+{
+    using System.Collections.Generic;
+
+    public class DropRateInfo
+    {
+        public int itemId, stackMin, stackMax;
+        public float dropRate;
+        public List<IItemDropRuleCondition> conditions = new List<IItemDropRuleCondition>();
+        public DropRateInfo(int item, int min, int max, float rate, List<IItemDropRuleCondition> conds)
+        {
+            itemId = item; stackMin = min; stackMax = max; dropRate = rate;
+            if (conds != null) conditions = conds;
+        }
+    }
+
+    public class DropRateInfoChainFeed
+    {
+        public int itemId;
+        public float parentDroprateChance;
+        public List<IItemDropRuleCondition> conditions = new List<IItemDropRuleCondition>();
+        public DropRateInfoChainFeed(float droprate) { parentDroprateChance = droprate; }
+    }
+
+    public interface IItemDropRuleCondition
+    {
+        bool CanDrop(DropAttemptInfo info);
+        bool CanShowItemDropInUI();
+    }
+
+    public struct DropAttemptInfo { }
+
+    public class IsExpertCondition : IItemDropRuleCondition
+    {
+        public bool CanDrop(DropAttemptInfo info) { return Main.expertMode; }
+        public bool CanShowItemDropInUI() { return true; }
+    }
+
+    public interface IItemDropRule
+    {
+        void ReportDroprates(List<DropRateInfo> drops, DropRateInfoChainFeed ratesInfo);
+    }
+
+    public class CommonDrop : IItemDropRule
+    {
+        int itemId, chanceDenominator, min, max;
+        List<IItemDropRuleCondition> conds = new List<IItemDropRuleCondition>();
+        public CommonDrop(int item, int chance, int minStack, int maxStack) { itemId = item; chanceDenominator = chance; min = minStack; max = maxStack; }
+        public CommonDrop With(params IItemDropRuleCondition[] cs) { conds.AddRange(cs); return this; }
+        public void ReportDroprates(List<DropRateInfo> drops, DropRateInfoChainFeed ratesInfo)
+        {
+            drops.Add(new DropRateInfo(itemId, min, max, ratesInfo.parentDroprateChance / chanceDenominator, conds));
+        }
+    }
+
+    public class ItemDropDatabase
+    {
+        public Dictionary<int, List<IItemDropRule>> rules = new Dictionary<int, List<IItemDropRule>>();
+        public List<IItemDropRule> GetRulesForNPCID(int npcNetId, bool includeGlobalDrops)
+        {
+            List<IItemDropRule> l;
+            return rules.TryGetValue(npcNetId, out l) ? l : new List<IItemDropRule>();
         }
     }
 }

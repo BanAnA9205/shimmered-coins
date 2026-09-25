@@ -43,10 +43,20 @@ export function ResultCard({ result, rank }: { result: ResultOut; rank: number }
           {result.gain >= 0 ? "+" : ""}
           {pct}%
         </span>
+        <span className="result-meta" title="growth per trip, ln(1+gain)/(L+c)">
+          ×{result.per_trip.toFixed(2)} per trip
+        </span>
+        <span className="result-meta" title={result.places.join(" → ")}>
+          {result.length} {result.length === 1 ? "place" : "places"}: {result.places.join(" → ")}
+        </span>
         <span className="result-meta">
           capital <Coins copper={result.capital} /> · profit <Coins copper={result.profit} />
         </span>
-        {result.repeatable && (
+        {result.one_shot ? (
+          <span className="badge badge-loop" title="uses limited shop stock: not repeatable">
+            One-shot
+          </span>
+        ) : (
           <span className="badge badge-loop" title="no limited-stock items: repeat forever">
             Repeatable loop
           </span>

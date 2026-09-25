@@ -78,6 +78,22 @@ class ShimmerRule:
     conditions: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class NpcDrop:
+    """One entry of an NPC's loot table: expected-value farming data.
+
+    ``rate`` is the probability per kill of one roll dropping ``min..max`` of ``item``;
+    ``conditions`` are the game's drop-condition class names (``"IsExpert"``,
+    ``"NotExpert"`` for the other difficulty, ...).
+    """
+
+    item: int
+    rate: float
+    min: int = 1
+    max: int = 1
+    conditions: tuple[str, ...] = ()
+
+
 CONDITION_SCOPES = ("world", "zone", "npc_present", "happiness", "craft_location", "player")
 
 
@@ -127,6 +143,7 @@ class Dataset:
     shops: list[ShopEntry] = field(default_factory=list)
     shimmer: list[ShimmerRule] = field(default_factory=list)
     npcs: dict[int, Npc] = field(default_factory=dict)
+    drops: list[tuple[int, tuple[NpcDrop, ...]]] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
     conditions: dict[str, ConditionInfo] = field(default_factory=dict)
 
@@ -193,6 +210,22 @@ class Dataset:
             for s in d.get("shimmer", [])
         ]
         npcs = {int(n["id"]): Npc(**n) for n in d.get("npcs", [])}
+        drops = [
+            (
+                int(e["npc"]),
+                tuple(
+                    NpcDrop(
+                        item=int(x["item"]),
+                        rate=float(x["rate"]),
+                        min=int(x.get("min", 1)),
+                        max=int(x.get("max", 1)),
+                        conditions=tuple(x.get("conditions", ())),
+                    )
+                    for x in e["drops"]
+                ),
+            )
+            for e in d.get("npc_drops", [])
+        ]
         conditions = {
             c["name"].lower(): ConditionInfo(
                 name=c["name"].lower(),
@@ -210,6 +243,7 @@ class Dataset:
             shops,
             shimmer,
             npcs,
+            drops,
             d.get("meta", {}),
             conditions,
         )
@@ -232,5 +266,12 @@ class Dataset:
             "shops": [clean(asdict(s)) for s in self.shops],
             "shimmer": [clean(asdict(s)) for s in self.shimmer],
             "npcs": [clean(asdict(n)) for n in self.npcs.values()],
+            "npc_drops": [
+                {
+                    "npc": npc,
+                    "drops": [clean(asdict(x)) for x in lst],
+                }
+                for npc, lst in self.drops
+            ],
             "conditions": [clean(asdict(c)) for c in self.conditions.values()],
         }

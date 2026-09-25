@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,12 @@ class NpcSetup:
             return 1.0
         return min(self.happiness.values())
 
+    def happiest_npc(self) -> int | None:
+        """The NPC with the best sell price: where the tour goes to sell (phase 2)."""
+        if not self.happiness or not self.happiness_affects_selling:
+            return None
+        return min(self.happiness, key=lambda n: (self.happiness[n], n))
+
 
 def condition_holds(
     cond: str, world: WorldConfig, npc: int | None = None, npcs: NpcSetup | None = None
@@ -117,17 +124,28 @@ def conditions_hold(
     return all(condition_holds(c, world, npc, npcs) for c in conds)
 
 
+def _game_round(x: float) -> int:
+    """The game's ``Math.Round`` on a float32 value: half-to-even, in 32-bit precision."""
+    return int(np.round(np.float32(x)))
+
+
 def buy_price(base_price: int, adjustment: float, discount: bool) -> int:
-    """Copper paid for one unit bought from an NPC."""
-    price = base_price
+    """Copper paid for one unit bought from an NPC.
+
+    Mirrors ``Player.GetItemExpectedPrice`` (verified against 1.4.5.8's pricing probe): the
+    Discount Card truncates ``value * 0.8`` in float32 *before* happiness, then the result is
+    rounded     half-to-even. Can be 0 (the game really sells value-1 items for free).
+    """
+    price = float(base_price)
     if discount:
-        price = int(price * 0.8)
-    return max(1, int(math.floor(price * adjustment + 0.5)))
+        price = int(np.float32(price) * np.float32(0.8))
+    return _game_round(np.float32(price) * np.float32(adjustment))
 
 
 def sell_price(value: int, adjustment: float) -> int:
-    """Copper received for one unit sold to an NPC (value/5, better when the NPC is happy)."""
-    return int(math.floor(value / adjustment + 0.5)) // 5
+    """Copper received for one unit sold to an NPC: the game rounds ``value / adjustment``
+    (float32, half-to-even) and the // 5 happens at the sale itself."""
+    return _game_round(np.float32(value) / np.float32(adjustment)) // 5
 
 
 def check_pricing(probe: list[dict]) -> dict:
@@ -149,11 +167,13 @@ def check_pricing(probe: list[dict]) -> dict:
     discount_bad = [p for p in buy_bad if p.get("discount")]
 
     def before_div5(p: dict) -> int:
-        return int(math.floor(p["value"] / p["adjustment"] + 0.5))
+        return int(np.round(np.float32(p["value"]) / np.float32(p["adjustment"])))
 
     readings = {
-        "value/adj/5": lambda p: sell_price(p["value"], p["adjustment"]),
-        "value/adj (the /5 happens when selling)": before_div5,
+        "value/adj to-even f32, /5 at sale (1.4.5 formula)": lambda p: sell_price(
+            p["value"], p["adjustment"]
+        ),
+        "value/adj rounded, /5 at sale": before_div5,
         "value/5 (happiness ignored)": lambda p: p["value"] // 5,
         "value (happiness ignored)": lambda p: p["value"],
     }

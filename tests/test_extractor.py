@@ -141,5 +141,19 @@ def test_cli_pipeline(dump, tmp_path, capsys):
     db = tmp_path / "db.sqlite"
     assert main(["data", "build", str(dump), "--out", str(db)]) == 0
     assert load_dataset(db).condition_info("zone:snow").description == "In Snow"
-    assert main(["search", str(db), "--npc", "Merchant"]) == 3
-    assert "9.9.9.9" in capsys.readouterr().err
+    assert main(["search", str(db), "--npc", "Merchant"]) == 0
+    assert "9.9.9.9" in capsys.readouterr().out
+
+
+def test_drops(dump):
+    ds = load_dataset(dump)
+    drops = {npc: {d.item: d for d in lst} for npc, lst in ds.drops}
+    # blue slime (mock npc 1): gel 1/2 per kill, slime staff 1/400
+    slime = drops[1]
+    assert slime[23].rate == pytest.approx(0.5)
+    assert (slime[23].min, slime[23].max) == (1, 3)
+    assert slime[1309].rate == pytest.approx(1 / 400)
+    # npc 17's drop carries the expert condition
+    expert = drops[17]
+    assert expert[4].rate == pytest.approx(1.0)
+    assert expert[4].conditions == ("IsExpertCondition",)

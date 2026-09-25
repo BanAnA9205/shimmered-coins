@@ -107,7 +107,7 @@ pyproject.toml, .github/workflows/ci.yml
 
 **Status (2026-09-25):**
 - Milestones 1, 2 and 4 are done.
-  - Milestone 2 is done against a mock game assembly. `shimcoins data fetch` downloads a real server zip from terraria.org, runs the extractor and cleans up, but it hasn't been run against a real build yet (needs Mono).
+  - Milestone 2 is done: `shimcoins data fetch` downloads a real server zip from terraria.org, runs the extractor and cleans up. It has been run for real against 1.4.5.8 (`data/1.4.5.8/db.sqlite`: 6195 items, 3603 recipes, 619 shop entries, 3347 shimmer rules; the pricing probe matches the engine's price formulas 50/50).
 - Milestone 3 is being redone: the step-by-step engine was removed in favour of [`ALGORITHM.md`](ALGORITHM.md).
 
 1. Scaffolding: pyproject, CI (pytest, ruff), a toy-world fixture.

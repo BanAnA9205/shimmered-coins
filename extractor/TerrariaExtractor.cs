@@ -28,6 +28,7 @@ static partial class Program
 
     static Assembly Game;
     static string GameDir;
+    static string TempDir;
     static readonly List<string> Warnings = new List<string>();
 
     static int Main(string[] args)
@@ -66,16 +67,17 @@ static partial class Program
         j.Key("source").Val(Path.GetFileName(path));
         j.Key("source_sha256").Val(Sha256(path));
         j.Key("extracted_at").Val(DateTime.UtcNow.ToString("o"));
-        j.Key("extractor").Val("TerrariaExtractor/1");
-        Section("pricing_probe", () => PricingProbe(j));
+        j.Key("extractor").Val("TerrariaExtractor/2");
+        Section("pricing_probe", j, () => PricingProbe(j));
         j.Key("warnings").Arr(); foreach (var w in Warnings) j.Val(w); j.End();
         j.End();
 
-        Section("items", () => Items(j));
-        Section("groups", () => Groups(j));
-        Section("recipes", () => Recipes(j));
-        Section("npcs+shops", () => NpcsAndShops(j, forceLegacy));
-        Section("shimmer", () => Shimmer(j));
+        Section("items", j, () => Items(j));
+        Section("groups", j, () => Groups(j));
+        Section("recipes", j, () => Recipes(j));
+        Section("npcs+shops", j, () => NpcsAndShops(j, forceLegacy));
+        Section("shimmer", j, () => Shimmer(j));
+        Section("drops", j, () => Drops(j));
         WriteCatalog(j);
         j.End();
 
@@ -115,6 +117,13 @@ static partial class Program
 
     static void Init()
     {
+        // The real game sets Program.SavePath in its own bootstrap before anything static in
+        // Terraria.Main runs: Main's static constructor does Path.Combine(Program.SavePath, ...).
+        // Without it, Main's cctor throws and the type is poisoned for the rest of the run
+        // (TypeInitializationException on every Main member, including Main.recipe).
+        TempDir = Path.Combine(Path.GetTempPath(), "shimcoins-extract-" + Path.GetRandomFileName());
+        Directory.CreateDirectory(TempDir);
+        Try("Program.SavePath", () => SetStatic("Terraria.Program", "SavePath", TempDir));
         Try("dedServ", () => SetStatic("Terraria.Main", "dedServ", true));
         Try("language", () =>
         {
@@ -123,6 +132,9 @@ static partial class Program
                 && x.GetParameters().Length == 1 && x.GetParameters()[0].ParameterType == typeof(string));
             m.Invoke(lm, new object[] { "en-US" });
         });
+        // 1.4.5+: Lang's legacy arrays (Lang.misc, ...) stay null until this runs; recipe group
+        // setup and item SetDefaults read them.
+        Try("Lang.InitializeLegacyLocalization", () => CallStatic("Terraria.Lang", "InitializeLegacyLocalization"));
         object main = null;
         Try("new Main()", () => { main = Activator.CreateInstance(T("Terraria.Main")); });
         bool full = false;
@@ -131,14 +143,53 @@ static partial class Program
         if (!full)
         {
             // Fallback: the pieces we need, in dependency order.
+            Try("stand-ins", StandIns);
             Try("Recipe.SetupRecipes", () => CallStatic("Terraria.Recipe", "SetupRecipes"));
-            Try("ContentSamples.Initialize", () => CallStatic("Terraria.ID.ContentSamples", "Initialize"));
+            if (Convert.ToInt32(GetStatic("Terraria.Recipe", "numRecipes")) == 0)
+            {
+                // 1.4.5+ split group setup out of SetupRecipes (which dies on RequireGroup
+                // without it); on 1.4.4 SetupRecipes registers the groups itself, so calling
+                // this first would double-register them.
+                Try("Recipe.SetupRecipeGroups", () => CallStatic("Terraria.Recipe", "SetupRecipeGroups"));
+                Try("ContentSamples.Initialize", () => CallStatic("Terraria.ID.ContentSamples", "Initialize"));
+                Try("Recipe.SetupRecipes (retry)", () => CallStatic("Terraria.Recipe", "SetupRecipes"));
+            }
             Try("NPCShopDatabase.Initialize", () => CallStatic("Terraria.GameContent.NPCShopDatabase", "Initialize"));
         }
+        Try("trim recipe table", () => TrimRecipeTable());
         Try("ShimmerTransforms.UpdateRecipeSets", () => CallStatic("Terraria.GameContent.ShimmerTransforms", "UpdateRecipeSets"));
         var n = Convert.ToInt32(GetStatic("Terraria.Recipe", "numRecipes"));
         if (n == 0) Try("Recipe.SetupRecipes (retry)", () => CallStatic("Terraria.Recipe", "SetupRecipes"));
         Log("recipes: " + GetStatic("Terraria.Recipe", "numRecipes"));
+    }
+
+    // The game has these by the time any content code runs; a headless extraction must add them
+    // itself or NullReferenceExceptions appear deep inside item/projectile/shop code.
+    static void StandIns()
+    {
+        var players = (Array)GetStatic("Terraria.Main", "player");
+        int my = Convert.ToInt32(GetStatic("Terraria.Main", "myPlayer"));
+        if (my < 0 || my >= players.Length) { my = 0; SetStatic("Terraria.Main", "myPlayer", 0); }
+        if (players.GetValue(my) == null)
+            players.SetValue(Activator.CreateInstance(T("Terraria.Player")), my);
+        if (GetStatic("Terraria.Main", "rand") == null)
+            SetStatic("Terraria.Main", "rand", Activator.CreateInstance(T("Terraria.Utilities.UnifiedRandom")));
+        var npcs = (Array)GetStatic("Terraria.Main", "npc");
+        for (int i = 0; i < npcs.Length; i++)
+            if (npcs.GetValue(i) == null) npcs.SetValue(Activator.CreateInstance(T("Terraria.NPC")), i);
+    }
+
+    // SetupRecipes leaves Main.recipe with nulls past numRecipes (the array is sized to
+    // maxRecipes); 1.4.5's MapArray-based helpers (ShimmerTransforms.UpdateRecipeSets) walk the
+    // whole array and choke on them.
+    static void TrimRecipeTable()
+    {
+        var n = Convert.ToInt32(GetStatic("Terraria.Recipe", "numRecipes"));
+        var arr = (Array)GetStatic("Terraria.Main", "recipe");
+        if (arr == null || arr.Length <= n || n == 0) return;
+        var trimmed = Array.CreateInstance(arr.GetType().GetElementType(), n);
+        Array.Copy(arr, trimmed, n);
+        SetStatic("Terraria.Main", "recipe", trimmed);
     }
 
     static string GameVersion()
@@ -207,25 +258,50 @@ static partial class Program
 
     static void Groups(Json j)
     {
-        var ids = (IDictionary)GetStatic("Terraria.RecipeGroup", "recipeGroupIDs");
+        // 1.4.4: recipeGroupIDs maps name -> id. 1.4.5 dropped it; the name comes from the
+        // group's own text (a localization key) instead.
+        IDictionary ids = null;
+        try { ids = (IDictionary)GetStatic("Terraria.RecipeGroup", "recipeGroupIDs"); } catch { }
+        if (ids != null)
+            foreach (DictionaryEntry e in ids) GroupNames[Convert.ToInt32(e.Value)] = Convert.ToString(e.Key);
         var groups = (IDictionary)GetStatic("Terraria.RecipeGroup", "recipeGroups");
-        foreach (DictionaryEntry e in ids) GroupNames[Convert.ToInt32(e.Value)] = Convert.ToString(e.Key);
         j.Key("groups").Arr();
         foreach (DictionaryEntry e in groups)
         {
             int gid = Convert.ToInt32(e.Key);
             GroupsById[gid] = e.Value;
             string name;
-            if (!GroupNames.TryGetValue(gid, out name)) { name = "group" + gid; GroupNames[gid] = name; }
+            if (!GroupNames.TryGetValue(gid, out name)) { name = GroupName(e.Value) ?? "group" + gid; GroupNames[gid] = name; }
             j.Obj();
             j.Key("name").Val(name);
             j.Key("items").Arr();
             foreach (var v in (IEnumerable)Get(e.Value, "ValidItems")) j.Val(Convert.ToInt32(v));
             j.End();
-            j.Key("icon_item").Val(Convert.ToInt32(Get(e.Value, "IconicItemId")));
+            j.Key("icon_item").Val(GroupIcon(e.Value));
             j.End();
         }
         j.End();
+    }
+
+    static string GroupName(object g)
+    {
+        try
+        {
+            var text = ((Delegate)Get(g, "GetText")).DynamicInvoke();
+            // 1.4.4: LocalizedText (use its Key); 1.4.5: the display string itself.
+            if (text is string) return (string)text;
+            var key = Convert.ToString(Get(text, "Key"));
+            return string.IsNullOrEmpty(key) ? null : key;
+        }
+        catch { return null; }
+    }
+
+    static int GroupIcon(object g)
+    {
+        foreach (var member in new[] { "IconicItemId", "DecraftItemId" })
+            try { return Convert.ToInt32(Get(g, member)); } catch { }
+        foreach (var v in (IEnumerable)Get(g, "ValidItems")) return Convert.ToInt32(v);
+        return 0;
     }
 
     static IEnumerable<object> Seq(object listOrArray)
@@ -276,7 +352,7 @@ static partial class Program
                 {
                     object g;
                     if (!GroupsById.TryGetValue(gid, out g)) continue;
-                    if (Convert.ToInt32(Get(g, "IconicItemId")) == type || Contains(Get(g, "ValidItems"), type))
+                    if (GroupIcon(g) == type || Contains(Get(g, "ValidItems"), type))
                     { grp = GroupNames[gid]; break; }
                 }
                 j.Obj();
@@ -286,14 +362,27 @@ static partial class Program
             }
             j.End();
             j.Key("stations").Arr();
-            foreach (var t in Seq(Get(r, "requiredTile"))) { int v = Convert.ToInt32(t); if (v >= 0) j.Val(v); }
-            j.End();
+            foreach (var t in StationTiles(r)) j.Val(t);
+            j.End();;
             j.Key("conditions").Arr();
             foreach (var c in RecipeConditions(r)) j.Val(c);
             j.End();
             j.End();
         }
         j.End();
+    }
+
+    // 1.4.4: int[] requiredTile. 1.4.5: a single int.
+    static IEnumerable<int> StationTiles(object r)
+    {
+        var rt = Get(r, "requiredTile");
+        if (rt is IEnumerable && !(rt is string))
+        {
+            foreach (var t in (IEnumerable)rt) { int v = Convert.ToInt32(t); if (v >= 0) yield return v; }
+            yield break;
+        }
+        var single = Convert.ToInt32(rt);
+        if (single >= 0) yield return single;
     }
 
     static IEnumerable<string> RecipeConditions(object r)
@@ -386,6 +475,7 @@ static partial class Program
     static bool ModernShops(SortedSet<int> npcs, List<string[]> entries)
     {
         var db = T("Terraria.GameContent.NPCShopDatabase");
+        if (db == null) return false;  // 1.4.5 went back to hard-coded Chest.SetupShop
         IEnumerable shops = null;
         try { shops = (IEnumerable)GetStatic(db, "AllShops"); } catch { }
         if (shops == null)
@@ -423,6 +513,14 @@ static partial class Program
     static readonly int[] LegacyShopNpc = {
         0, 17, 19, 20, 38, 54, 107, 108, 124, 142, 160, 178, 207, 208, 209, 227, 228, 229, 353, 368, 453, 550, 588, 633, 663 };
 
+    static object NewShopChest()
+    {
+        // 1.4.4: new Chest(bank). 1.4.5: the ctor is gone; Chest.CreateShop() makes a shop chest.
+        try { return Activator.CreateInstance(T("Terraria.Chest"), new object[] { false }); } catch { }
+        try { return CallStatic("Terraria.Chest", "CreateShop"); } catch { }
+        return Activator.CreateInstance(T("Terraria.Chest"));
+    }
+
     static void LegacyShops(SortedSet<int> npcs, List<string[]> entries)
     {
         Warn("legacy shop extraction: shop index -> NPC table is approximate and prices set inside SetupShop are not captured");
@@ -434,7 +532,7 @@ static partial class Program
             int captured = shop;
             var ev = new Evaluator<HashSet<int>>(() =>
             {
-                var chest = Activator.CreateInstance(chestType, new object[] { false });
+                var chest = NewShopChest();
                 CallInst(chest, "SetupShop", captured);
                 var set = new HashSet<int>();
                 foreach (var it in (Array)Get(chest, "item"))
@@ -647,11 +745,30 @@ static partial class Program
 
     static void PricingProbe(Json j)
     {
-        var player = Activator.CreateInstance(T("Terraria.Player"));
-        var helper = GetStatic("Terraria.Main", "ShopHelper");
-        var adjField = helper.GetType().GetFields(INST).FirstOrDefault(f => f.FieldType == typeof(float)
-            && f.Name.ToLowerInvariant().Contains("priceadjustment"));
+        var player = LocalPlayer();
         var m = player.GetType().GetMethod("GetItemExpectedPrice", ANY);
+        // Where the price adjustment lives: 1.4.4 reads Main.ShopHelper._currentPriceAdjustment,
+        // 1.4.5 the player's currentShoppingSettings.PriceAdjustment.
+        Action<float> setAdj = null;
+        try
+        {
+            var helper = GetStatic("Terraria.Main", "ShopHelper");
+            var adjField = helper.GetType().GetFields(INST).FirstOrDefault(f =>
+                (f.FieldType == typeof(float) || f.FieldType == typeof(double))
+                && f.Name.ToLowerInvariant().Contains("priceadjustment"));
+            if (helper != null && adjField != null)
+                setAdj = v => adjField.SetValue(helper, v);
+        }
+        catch { }
+        if (setAdj == null)
+        {
+            var ssField = player.GetType().GetField("currentShoppingSettings", INST);
+            var adjField = ssField == null ? null : ssField.FieldType.GetFields(INST).FirstOrDefault(f =>
+                (f.FieldType == typeof(float) || f.FieldType == typeof(double))
+                && f.Name.ToLowerInvariant().Contains("priceadjustment"));
+            if (adjField == null) throw new MissingMemberException("price adjustment knob not found");
+            setAdj = v => { var ss = ssField.GetValue(player); adjField.SetValue(ss, v); ssField.SetValue(player, ss); };
+        }
         // Bool members like discountAvailable / discountEquipped; set together, whatever the version.
         var discountFields = player.GetType().GetFields(INST)
             .Where(f => f.FieldType == typeof(bool) && f.Name.ToLowerInvariant().Contains("discount")).ToList();
@@ -662,7 +779,7 @@ static partial class Program
             foreach (var value in new[] { 1, 7, 100, 12345, 5000000 })
             {
                 foreach (var f in discountFields) f.SetValue(player, discount);
-                adjField.SetValue(helper, adj);
+                setAdj(adj);
                 var item = NewItem(1);
                 Set(item, "value", value);
                 var ps = m.GetParameters();
@@ -683,6 +800,83 @@ static partial class Program
         j.Key("pricing_probe").Raw("[" + string.Join(",", probeList) + "]");
     }
 
+    // ------------------------------------------------------------------ npc drops -------------
+
+    static void Drops(Json j)
+    {
+        // The game's own loot tables, evaluated via IItemDropRule.ReportDroprates: every
+        // (item, stack range, rate, conditions) the rule can produce, exactly as the game
+        // computes them for the bestiary UI.
+        var mainT = T("Terraria.Main");
+        object db = GetStatic(mainT, "ItemDropsDB");
+        if (db == null)
+        {
+            // The game populates ItemDropsDB during Main init; ours never got that far.
+            db = Activator.CreateInstance(T("Terraria.GameContent.ItemDropRules.ItemDropDatabase"));
+            mainT.GetField("ItemDropsDB", STATIC).SetValue(null, db);
+            Try("ItemDropDatabase.Populate", () => CallInst(db, "Populate"));
+        }
+
+        var getRules = db.GetType().GetMethod("GetRulesForNPCID");
+        var report = T("Terraria.GameContent.ItemDropRules.IItemDropRule").GetMethod("ReportDroprates");
+        var infoType = T("Terraria.GameContent.ItemDropRules.DropRateInfo");
+        var fItem = infoType.GetField("itemId");
+        var fMin = infoType.GetField("stackMin");
+        var fMax = infoType.GetField("stackMax");
+        var fRate = infoType.GetField("dropRate");
+        var fConds = infoType.GetField("conditions");
+        // 1.4.5 conditions are bare predicates (no Description member): record the class
+        // name; the Python side maps the known ones (NotExpert -> "!expert", etc.)
+
+        int npcCount = Convert.ToInt32(GetStatic("Terraria.ID.NPCID", "Count"));
+        j.Key("npc_drops").Arr();
+        int rulesTotal = 0, npcsWithDrops = 0;
+        for (int npc = -80; npc < npcCount; npc++)
+        {
+            IEnumerable rules = null;
+            try { rules = getRules.Invoke(db, new object[] { npc, false }) as IEnumerable; }
+            catch { continue; }
+            if (rules == null) continue;
+            var ruleList = new List<object>();
+            foreach (var r in rules) ruleList.Add(r);
+            if (ruleList.Count == 0) continue;
+            var infos = Activator.CreateInstance(typeof(List<>).MakeGenericType(infoType));
+            var feed = Activator.CreateInstance(
+                T("Terraria.GameContent.ItemDropRules.DropRateInfoChainFeed"),
+                new object[] { 1f });  // root chance: rules multiply by the feed's rate
+            foreach (var rule in ruleList)
+            {
+                try { report.Invoke(rule, new object[] { infos, feed }); rulesTotal++; }
+                catch (Exception e) { Warn("drops npc " + npc + ": " + Inner(e).Message); }
+            }
+            var buf = new List<string>();
+            foreach (var info in (IEnumerable)infos)
+            {
+                int item = Convert.ToInt32(fItem.GetValue(info));
+                if (item <= 0) continue;
+                int mn = Convert.ToInt32(fMin.GetValue(info));
+                int mx = Convert.ToInt32(fMax.GetValue(info));
+                float rate = (float)fRate.GetValue(info);
+                var conds = fConds.GetValue(info) as IEnumerable;
+                var cdescs = new List<string>();
+                if (conds != null)
+                    foreach (var c in conds)
+                        cdescs.Add(c.GetType().Name);
+                buf.Add("{\"item\":" + item + ",\"min\":" + mn + ",\"max\":" + mx
+                    + ",\"rate\":" + rate.ToString(CultureInfo.InvariantCulture)
+                    + ",\"conditions\":[" + string.Join(",", System.Linq.Enumerable.Select(cdescs, Json.Quote)) + "]}");
+            }
+            if (buf.Count == 0) continue;
+            npcsWithDrops++;
+            j.Obj();
+            j.Key("npc").Val(npc);
+            j.Key("drops").Raw("[" + string.Join(",", buf) + "]");
+            j.End();
+        }
+        j.End();
+        Log("npc drops: " + npcsWithDrops + " npcs, " + rulesTotal + " rules");
+    }
+
     // ------------------------------------------------------------------ probe mode -----------
 
     static void Probe()
@@ -690,9 +884,11 @@ static partial class Program
         Console.WriteLine("version: " + GameVersion());
         Console.WriteLine("ItemID.Count: " + Safe(() => ItemCount()));
         Console.WriteLine("Recipe.numRecipes: " + Safe(() => GetStatic("Terraria.Recipe", "numRecipes")));
+        TypeSearch("Shop");
+        TypeSearch("Shimmer");
         foreach (var tn in new[] { "Terraria.Recipe", "Terraria.RecipeGroup", "Terraria.GameContent.ShimmerTransforms",
-                                   "Terraria.GameContent.NPCShopDatabase", "Terraria.GameContent.NPCShop",
-                                   "Terraria.Condition", "Terraria.Chest", "Terraria.GameContent.ShopHelper" })
+                                    "Terraria.GameContent.NPCShopDatabase", "Terraria.GameContent.NPCShop",
+                                    "Terraria.Condition", "Terraria.Chest", "Terraria.GameContent.ShopHelper" })
         {
             var t = T(tn);
             Console.WriteLine("\n== " + tn + (t == null ? " (missing)" : ""));
@@ -706,6 +902,19 @@ static partial class Program
         finally { RestoreKnobs(); }
         Console.WriteLine("\nwarnings:");
         foreach (var w in Warnings) Console.WriteLine("  " + w);
+    }
+
+    // Lists every loadable type whose full name contains `part`: how relocated classes (e.g. the
+    // 1.4.5 shop database) are found when a fixed type name goes missing.
+    static void TypeSearch(string part)
+    {
+        Type[] types;
+        try { types = Game.GetTypes(); }
+        catch (ReflectionTypeLoadException e) { types = e.Types; }
+        Console.WriteLine("\n== types containing " + part);
+        foreach (var t in types.Where(t => t != null && t.FullName != null && t.FullName.Contains(part))
+                               .OrderBy(t => t.FullName))
+            Console.WriteLine("  " + t.FullName);
     }
 
     static string Describe(MemberInfo m)
@@ -803,13 +1012,27 @@ static partial class Program
     static bool Try(string what, Action a)
     {
         try { a(); return true; }
-        catch (Exception e) { Warn(what + ": " + Inner(e).GetType().Name + ": " + Inner(e).Message); return false; }
+        catch (Exception e) { Warn(what + ": " + Describe(e)); return false; }
     }
 
-    static void Section(string what, Action a)
+    static string Describe(Exception e)
     {
+        e = Inner(e);
+        var frames = (e.StackTrace ?? "").Split('\n').Where(l => l.Trim().StartsWith("at Terraria")).Take(3);
+        return e.GetType().Name + ": " + e.Message + (frames.Any() ? "\n      " + string.Join("\n      ", frames) : "");
+    }
+
+    // A failed section is rolled back out of the JSON and skipped: the dump keeps whatever the
+    // other sections produced (README: "logs warnings and keeps going section by section").
+    static void Section(string what, Json j, Action a)
+    {
+        object mark = j.Mark();
         try { a(); }
-        catch (Exception e) { Warn("section " + what + " failed: " + Inner(e)); throw; }
+        catch (Exception e)
+        {
+            j.Restore(mark);
+            Warn("section " + what + " failed, skipped: " + Inner(e).GetType().Name + ": " + Inner(e).Message);
+        }
     }
 
     static string Safe(Func<object> f) { try { return Convert.ToString(f()); } catch (Exception e) { return "ERR " + Inner(e).Message; } }
@@ -843,6 +1066,20 @@ class Json
     Json Open(char open, char close) { Sep(); sb.Append(open); closers.Push(close); first.Push(true); return this; }
     public Json Obj() { return Open('{', '}'); }
     public Json Arr() { return Open('[', ']'); }
+
+    public object Mark()
+    {
+        return Tuple.Create(sb.Length, closers.ToArray(), first.ToArray(), afterKey);
+    }
+
+    public void Restore(object mark)
+    {
+        var m = (Tuple<int, char[], bool[], bool>)mark;
+        sb.Length = m.Item1;
+        closers.Clear(); foreach (var c in m.Item2) closers.Push(c);
+        first.Clear(); foreach (var f in m.Item3) first.Push(f);
+        afterKey = m.Item4;
+    }
 
     public Json End()
     {

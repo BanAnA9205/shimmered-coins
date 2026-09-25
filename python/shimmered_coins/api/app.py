@@ -17,9 +17,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..data import Dataset, load_dataset
-from ..model import ANY_ZONE, KINDS, Constraints, NpcSetup, WorldConfig, build_graph
+from ..model import ANY_ZONE, KINDS, SELL, Constraints, NpcSetup, WorldConfig, build_graph
 from ..model.conditions import flag_groups, zones
-from ..model.graph import Graph, Transform
+from ..model.graph import Graph, Transform, format_coins
+from ..search import SearchParams, search
 
 DEMO = Path(__file__).resolve().parent.parent / "demo" / "toy_world.json"
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -27,7 +28,14 @@ MAX_TIME_LIMIT = 300.0
 
 
 def data_dir() -> Path:
-    return Path(os.environ.get("SHIMCOINS_DATA", "data"))
+    env = os.environ.get("SHIMCOINS_DATA")
+    if env:
+        return Path(env)
+    root = Path("data")
+    if root.is_dir():
+        return root
+    checkout = Path(__file__).resolve().parents[3] / "data"  # serve from anywhere in the repo
+    return checkout if checkout.is_dir() else root
 
 
 def discover() -> dict[str, Path]:
@@ -72,14 +80,15 @@ class SearchRequest(BaseModel):
     exclude: list[int] = []
     must_use: list[int] = []
     start: list[int] | None = None
-    max_steps: int = Field(4, ge=1, le=12)
     top_n: int = Field(10, ge=1, le=100)
-    leftover: str = "discard"
+    overhead: float = Field(1.0, ge=0, description="fixed per-loop effort c in the score")
+    max_places: int | None = Field(None, ge=1)
     min_gain: float = 0.0
     allow_loss: bool = False
-    budget: int | None = None
+    wallet: int | None = Field(
+        None, description="copper: drop unaffordable recipes, scale the rest"
+    )
     time_limit: float = Field(30.0, gt=0, le=MAX_TIME_LIMIT)
-    max_nodes: int = Field(500_000, ge=1)
 
 
 def npc_setup(req: SearchRequest) -> NpcSetup:
@@ -118,8 +127,88 @@ def _move_json(g: Graph, t: Transform, batches: int, text: str) -> dict:
     }
 
 
+def sprites_dir() -> Path:
+    return WEB_DIST.parent / "public" / "sprites"
+
+
+def sprite_count() -> int:
+    d = sprites_dir()
+    return sum(1 for _ in d.glob("Item_*.png")) if d.is_dir() else 0
+
+
+_sprite_job: dict = {"running": False, "done": 0, "total": 0, "error": None, "when": None}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="shimmered-coins")
+
+    @app.get("/api/sprites")
+    def sprites() -> dict:
+        from ..data.sprites import find_game_installs
+
+        return {"installed": sprite_count(), "sources": find_game_installs()}
+
+    @app.get("/api/sprites/preview")
+    def sprites_preview(dataset: str = "demo", limit: int = 60) -> list[dict]:
+        d = sprites_dir()
+        if not d.is_dir():
+            return []
+        ds = get_dataset(dataset)
+        out = []
+        for p in sorted(d.glob("Item_*.png")):
+            item = int(p.stem.split("_")[1])
+            it = ds.items.get(item)
+            if it is None:
+                continue
+            out.append({"id": item, "name": it.name, "url": f"/sprites/{p.name}"})
+            if len(out) >= limit:
+                break
+        return out
+
+    @app.post("/api/sprites/import")
+    def sprites_import(body: dict) -> dict:
+        import threading
+
+        from ..data.sprites import find_game_installs, import_sprites
+
+        if _sprite_job["running"]:
+            raise HTTPException(409, "an import is already running")
+        path = body.get("path")
+        sources = {s["path"]: s for s in find_game_installs()}
+        if path:
+            images = Path(path)
+            if not images.is_dir():
+                raise HTTPException(400, f"not a directory: {path}")
+        elif sources:
+            images = Path(next(iter(sources.values()))["path"])
+        else:
+            raise HTTPException(404, "no Terraria/tModLoader install found; pass a path")
+        _sprite_job.update(running=True, done=0, total=0, error=None, when=None)
+
+        def run() -> None:
+            try:
+                import_sprites(
+                    images,
+                    sprites_dir(),
+                    progress=lambda done, total: _sprite_job.update(done=done, total=total),
+                )
+            except Exception as e:  # noqa: BLE001 - reported to the UI
+                _sprite_job["error"] = str(e)
+            finally:
+                _sprite_job["running"] = False
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"started": True, "path": str(images)}
+
+    @app.get("/api/sprites/import")
+    def sprites_import_status() -> dict:
+        return {
+            "running": _sprite_job["running"],
+            "done": _sprite_job["done"],
+            "total": _sprite_job["total"],
+            "error": _sprite_job["error"],
+            "installed": sprite_count(),
+        }
 
     @app.get("/api/datasets")
     def list_datasets() -> list[dict]:
@@ -160,23 +249,61 @@ def create_app() -> FastAPI:
         if not req.npcs:
             raise HTTPException(400, "select at least one NPC")
         bad = set(req.kinds) - set(KINDS)
-        if bad or req.leftover not in ("discard", "sell"):
-            raise HTTPException(400, "invalid kinds or leftover policy")
+        if bad:
+            raise HTTPException(400, f"invalid kinds: {sorted(bad)}")
         g = build_graph(
             ds,
             WorldConfig(flags=frozenset(req.flags), shimmer=req.shimmer),
             npc_setup(req),
             Constraints(
-                kinds=frozenset(req.kinds),
+                kinds=frozenset(req.kinds) | {SELL},
                 include_items=frozenset(req.include) if req.include is not None else None,
                 exclude_items=frozenset(req.exclude),
             ),
         )
-        raise HTTPException(
-            503,
-            f"The search engine is being rebuilt around recipes (docs/ALGORITHM.md). "
-            f"This setup has {len(g.transforms)} moves available.",
+        rep = search(
+            g,
+            SearchParams(
+                top=req.top_n,
+                overhead=req.overhead,
+                min_gain=req.min_gain,
+                allow_loss=req.allow_loss,
+                must_use=frozenset(req.must_use),
+                start_items=frozenset(req.start) if req.start is not None else None,
+                wallet=req.wallet,
+                max_places=req.max_places,
+                time_limit=req.time_limit,
+            ),
         )
+        return {
+            "version": ds.version,
+            "moves_available": len(g.transforms),
+            "stats": vars(rep.stats),
+            "loops": [
+                {"moves": [_move_json(g, m.transform, m.batches, m.text) for m in moves]}
+                for moves in rep.loops
+            ],
+            "results": [
+                {
+                    "gain": r.gain,
+                    "lp_gain": float(r.lp_gain),
+                    "capital": r.capital,
+                    "capital_text": format_coins(r.capital),
+                    "profit": r.profit,
+                    "profit_text": format_coins(r.profit),
+                    "length": r.length,
+                    "places": r.places,
+                    "score": r.score,
+                    "per_trip": r.per_trip,
+                    "one_shot": r.one_shot,
+                    "moves": [_move_json(g, m.transform, m.batches, m.text) for m in r.moves],
+                    "leftover": [
+                        {"id": i, "name": g.name(i), "count": c} for i, c in r.leftover.items()
+                    ],
+                }
+                for r in rep.results
+            ],
+        }
 
     if WEB_DIST.is_dir():
         app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
