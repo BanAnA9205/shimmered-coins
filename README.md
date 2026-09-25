@@ -45,7 +45,11 @@ shimcoins serve            # http://127.0.0.1:8765, datasets from ./data (plus t
 For UI development, run `npm run dev` inside `web/` while `shimcoins serve` is running. The dev server proxies `/api` to it.
 
 - **Font:** put a Terraria-style font at `web/public/fonts/terraria.ttf`. It's gitignored and used automatically.
-- **Item sprites:** `shimcoins data sprites <path-to-Terraria>/Content/Images` converts the game's `Item_*.xnb` art to PNGs in `web/public/sprites/` (run it where the game is installed; use `--bgra` if colors come out wrong).
+- **Item sprites:** the UI's **Sprites** tab scans for your Terraria/tModLoader install
+  automatically (or `shimcoins sprites` on the CLI) and imports the game's `Item_*.xnb` art —
+  XNA LZX and MonoGame LZ4 XNBs both decode — into `web/public/sprites/`. Set
+  `$SHIMCOINS_TERRARIA` if Steam lives somewhere unusual. Sprites are Re-Logic's art: they stay
+  local and gitignored.
 
 ## How the search works
 

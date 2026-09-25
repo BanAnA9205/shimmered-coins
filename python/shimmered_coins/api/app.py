@@ -127,8 +127,88 @@ def _move_json(g: Graph, t: Transform, batches: int, text: str) -> dict:
     }
 
 
+def sprites_dir() -> Path:
+    return WEB_DIST.parent / "public" / "sprites"
+
+
+def sprite_count() -> int:
+    d = sprites_dir()
+    return sum(1 for _ in d.glob("Item_*.png")) if d.is_dir() else 0
+
+
+_sprite_job: dict = {"running": False, "done": 0, "total": 0, "error": None, "when": None}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="shimmered-coins")
+
+    @app.get("/api/sprites")
+    def sprites() -> dict:
+        from ..data.sprites import find_game_installs
+
+        return {"installed": sprite_count(), "sources": find_game_installs()}
+
+    @app.get("/api/sprites/preview")
+    def sprites_preview(dataset: str = "demo", limit: int = 60) -> list[dict]:
+        d = sprites_dir()
+        if not d.is_dir():
+            return []
+        ds = get_dataset(dataset)
+        out = []
+        for p in sorted(d.glob("Item_*.png")):
+            item = int(p.stem.split("_")[1])
+            it = ds.items.get(item)
+            if it is None:
+                continue
+            out.append({"id": item, "name": it.name, "url": f"/sprites/{p.name}"})
+            if len(out) >= limit:
+                break
+        return out
+
+    @app.post("/api/sprites/import")
+    def sprites_import(body: dict) -> dict:
+        import threading
+
+        from ..data.sprites import find_game_installs, import_sprites
+
+        if _sprite_job["running"]:
+            raise HTTPException(409, "an import is already running")
+        path = body.get("path")
+        sources = {s["path"]: s for s in find_game_installs()}
+        if path:
+            images = Path(path)
+            if not images.is_dir():
+                raise HTTPException(400, f"not a directory: {path}")
+        elif sources:
+            images = Path(next(iter(sources.values()))["path"])
+        else:
+            raise HTTPException(404, "no Terraria/tModLoader install found; pass a path")
+        _sprite_job.update(running=True, done=0, total=0, error=None, when=None)
+
+        def run() -> None:
+            try:
+                import_sprites(
+                    images,
+                    sprites_dir(),
+                    progress=lambda done, total: _sprite_job.update(done=done, total=total),
+                )
+            except Exception as e:  # noqa: BLE001 - reported to the UI
+                _sprite_job["error"] = str(e)
+            finally:
+                _sprite_job["running"] = False
+
+        threading.Thread(target=run, daemon=True).start()
+        return {"started": True, "path": str(images)}
+
+    @app.get("/api/sprites/import")
+    def sprites_import_status() -> dict:
+        return {
+            "running": _sprite_job["running"],
+            "done": _sprite_job["done"],
+            "total": _sprite_job["total"],
+            "error": _sprite_job["error"],
+            "installed": sprite_count(),
+        }
 
     @app.get("/api/datasets")
     def list_datasets() -> list[dict]:

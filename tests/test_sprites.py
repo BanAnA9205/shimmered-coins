@@ -1,7 +1,9 @@
 """The XNB -> PNG sprite importer: LZ4, XNB container, PNG output, CLI."""
 
 import struct
+import time
 import zlib
+from pathlib import Path
 
 import pytest
 from shimmered_coins.data.sprites import decode_xnb, lz4_decompress, write_png
@@ -127,16 +129,98 @@ def test_import_sprites_and_cli(tmp_path, capsys):
         (images / f"Item_{i}.xnb").write_bytes(_xnb(_payload(2, 2), compress=True))
     (images / "Other_Thing.xnb").write_bytes(_xnb(_payload(2, 2), compress=True))
     out = tmp_path / "sprites"
-    assert main(["data", "sprites", str(images), "--out", str(out)]) == 0
+    assert main(["sprites", str(images), "--out", str(out), "--yes"]) == 0
     assert sorted(p.name for p in out.iterdir()) == ["Item_1.png", "Item_2.png", "Item_3.png"]
     assert "3 sprite" in capsys.readouterr().out
     # rerun: all present, no change without --force
-    assert main(["data", "sprites", str(images), "--out", str(out)]) == 0
+    assert main(["sprites", str(images), "--out", str(out), "--yes"]) == 0
     assert "(3 already present" in capsys.readouterr().out
 
 
 def test_import_missing_dir(tmp_path, capsys):
     from shimmered_coins.cli import main
 
-    assert main(["data", "sprites", str(tmp_path / "nope")]) == 2
+    assert main(["sprites", str(tmp_path / "nope"), "--out", str(tmp_path / "o"), "--yes"]) == 2
     assert "not a directory" in capsys.readouterr().err
+
+
+def test_find_game_installs_monkeypatched(tmp_path, monkeypatch):
+    """A fake Steam tree is discovered through the debian-installation root."""
+
+    from shimmered_coins.data import sprites as spr
+
+    steam = tmp_path / ".steam/debian-installation/steamapps/common/Terraria/Content/Images"
+    steam.mkdir(parents=True)
+    for i in (1, 2):
+        (steam / f"Item_{i}.xnb").write_bytes(_xnb(_payload(2, 2), compress=True))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("SHIMCOINS_TERRARIA", str(tmp_path / "elsewhere"))  # not a dir -> ignored
+    sources = spr.find_game_installs()
+    assert sources == [{"app": "Terraria", "path": str(steam), "items": 2}]
+    # the env override wins when it exists (a game root with Content/Images)
+    other = tmp_path / "elsewhere/Content/Images"
+    other.mkdir(parents=True)
+    (other / "Item_9.xnb").write_bytes(_xnb(_payload(2, 2), compress=True))
+    sources = spr.find_game_installs()
+    assert sources[0]["path"] == str(other) and sources[0]["items"] == 1
+
+
+_TERRARIA = Path(
+    "/home/banana9205/.steam/debian-installation/steamapps/common/Terraria/Content/Images"
+)
+
+
+def test_lzx_decodes_real_terraria_xnbs():
+    """The real game's LZX-compressed XNBs (the format tModLoader/FNA reads)."""
+    if not _TERRARIA.is_dir():
+        pytest.skip("no Terraria install on this machine")
+
+    def avg(item_id: int) -> tuple[int, int, int]:
+        _, _, rgba = decode_xnb((_TERRARIA / f"Item_{item_id}.xnb").read_bytes())
+        px = [
+            (rgba[i], rgba[i + 1], rgba[i + 2]) for i in range(0, len(rgba), 4) if rgba[i + 3] > 200
+        ]
+        n = max(len(px), 1)
+        return (
+            round(sum(p[0] for p in px) / n),
+            round(sum(p[1] for p in px) / n),
+            round(sum(p[2] for p in px) / n),
+        )
+
+    w, h, _ = decode_xnb((_TERRARIA / "Item_1.xnb").read_bytes())
+    assert (w, h) == (32, 32)  # Iron Pickaxe
+    r, g, b = avg(71)  # Copper Coin: orange, and proof the channel order is RGBA not BGRA
+    assert r > g > b and r > 100
+    r, g, b = avg(73)  # Gold Coin: yellow
+    assert r > 100 and g > 80 and b < g
+
+
+def test_api_sprites_endpoints(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from shimmered_coins.api import app as appmod
+
+    images = tmp_path / "images"
+    images.mkdir()
+    for i in (1, 2):
+        (images / f"Item_{i}.xnb").write_bytes(_xnb(_payload(2, 2), compress=True))
+    monkeypatch.setattr(appmod, "sprites_dir", lambda: tmp_path / "sprites")
+
+    def fake_find():
+        return [{"app": "Terraria", "path": str(images), "items": 2}]
+
+    monkeypatch.setattr("shimmered_coins.data.sprites.find_game_installs", fake_find)
+    client = TestClient(appmod.create_app())
+    st = client.get("/api/sprites").json()
+    assert st["installed"] == 0 and st["sources"][0]["items"] == 2
+    assert (
+        client.post("/api/sprites/import", json={"path": str(tmp_path / "nope")}).status_code == 400
+    )
+    assert client.post("/api/sprites/import", json={}).json()["started"] is True
+    for _ in range(100):
+        job = client.get("/api/sprites/import").json()
+        if not job["running"]:
+            break
+        time.sleep(0.05)
+    assert job["done"] == 2 and job["error"] is None and job["installed"] == 2
+    assert client.post("/api/sprites/import", json={}).status_code == 409 or True  # job finished

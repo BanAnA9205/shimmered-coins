@@ -10,6 +10,7 @@ import {
 } from "./api";
 import { ItemPicker } from "./components/ItemPicker";
 import { ResultCard } from "./components/ResultCard";
+import { SpritesTab } from "./components/SpritesTab";
 
 const ALL_KINDS: Kind[] = ["buy", "craft", "shimmer"];
 
@@ -108,6 +109,7 @@ function mood(adj: number): string {
 }
 
 export default function App() {
+  const [tab, setTab] = useState<"search" | "sprites">("search");
   const [s, setS] = useState<Settings>(loadSettings);
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [info, setInfo] = useState<DatasetInfo | null>(null);
@@ -189,6 +191,20 @@ export default function App() {
       <header className="title">
         <h1>Shimmered Coins</h1>
         <p className="subtitle">find the most profitable buy · craft · shimmer · sell chains</p>
+        <nav className="tab-bar">
+          <button
+            className={`tab ${tab === "search" ? "active" : ""}`}
+            onClick={() => setTab("search")}
+          >
+            Search
+          </button>
+          <button
+            className={`tab ${tab === "sprites" ? "active" : ""}`}
+            onClick={() => setTab("sprites")}
+          >
+            Sprites
+          </button>
+        </nav>
       </header>
 
       <div className="layout">
@@ -346,6 +362,10 @@ export default function App() {
         </aside>
 
         <main className="main">
+          {tab === "sprites" ? (
+            <SpritesTab dataset={s.dataset} />
+          ) : (
+          <>
           <section className="panel search-panel">
             <h2>Search</h2>
             <div className="row">
@@ -494,6 +514,8 @@ export default function App() {
                 <ResultCard key={i} result={r} rank={i + 1} />
               ))}
             </section>
+          )}
+          </>
           )}
         </main>
       </div>

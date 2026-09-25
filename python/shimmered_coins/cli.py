@@ -146,28 +146,6 @@ def cmd_data_info(a: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_data_sprites(a: argparse.Namespace) -> int:
-    from .data.sprites import import_sprites
-
-    if not Path(a.dir).is_dir():
-        print(f"not a directory: {a.dir}", file=sys.stderr)
-        return 2
-    out = Path(a.out) if a.out else fetch_mod.repo_root() / "web" / "public" / "sprites"
-    try:
-        done, skipped = import_sprites(Path(a.dir), out, bgra=a.bgra, force=a.force)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"sprites: {e}", file=sys.stderr)
-        return 2
-    msg = f"wrote {done} sprite(s) to {out}"
-    if skipped:
-        msg += f" ({skipped} already present, use --force to redo)"
-    if a.bgra:
-        msg += " (R/B channels swapped)"
-    print(msg)
-    print("restart 'shimcoins serve' or hard-refresh the page to see them")
-    return 0
-
-
 def cmd_data_diff(a: argparse.Namespace) -> int:
     d = diff(load_dataset(a.a), load_dataset(a.b))
     if a.json:
@@ -267,6 +245,43 @@ def cmd_search(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sprites(a: argparse.Namespace) -> int:
+    from .data.sprites import find_game_installs, import_sprites
+
+    out = Path(a.out) if a.out else fetch_mod.repo_root() / "web" / "public" / "sprites"
+    if a.dir:
+        if not Path(a.dir).is_dir():
+            print(f"not a directory: {a.dir}", file=sys.stderr)
+            return 2
+        sources = [{"app": a.dir, "path": a.dir, "items": -1}]
+    else:
+        sources = find_game_installs()
+        if not sources:
+            print(
+                "no Terraria or tModLoader install found; pass the Content/Images dir",
+                file=sys.stderr,
+            )
+            return 2
+    print("found game installs:")
+    for k, src in enumerate(sources, 1):
+        label = f"{k}. {src['app']}: {src['path']}" + (
+            f" ({src['items']} item sprites)" if src["items"] >= 0 else ""
+        )
+        print(f"  {label}")
+    pick = sources[0]
+    if len(sources) > 1 and not a.yes:
+        choice = input(f"import from [1-{len(sources)}] (default 1): ").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(sources):
+            pick = sources[int(choice) - 1]
+    done, skipped = import_sprites(Path(pick["path"]), out, bgra=a.bgra, force=a.force)
+    msg = f"wrote {done} sprite(s) to {out}"
+    if skipped:
+        msg += f" ({skipped} already present, use --force to redo)"
+    print(msg)
+    print("hard-refresh the page (or restart 'shimcoins serve') to see them")
+    return 0
+
+
 def cmd_serve(a: argparse.Namespace) -> int:
     import os
 
@@ -306,14 +321,6 @@ def build_parser() -> argparse.ArgumentParser:
     i = d.add_parser("info", help="summarize a dataset")
     i.add_argument("source")
     i.set_defaults(func=cmd_data_info)
-    sp = d.add_parser("sprites", help="import Item_*.xnb item art from a Terraria install")
-    sp.add_argument("dir", help="the game's Content/Images directory")
-    sp.add_argument("--out", help="default: <repo>/web/public/sprites")
-    sp.add_argument("--force", action="store_true", help="overwrite existing PNGs")
-    sp.add_argument(
-        "--bgra", action="store_true", help="swap R and B channels if the colors look wrong"
-    )
-    sp.set_defaults(func=cmd_data_sprites)
     df = d.add_parser("diff", help="what changed between two versions")
     df.add_argument("a")
     df.add_argument("b")
@@ -368,6 +375,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--time-limit", type=float, default=30.0)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_search)
+
+    sp = sub.add_parser(
+        "sprites", help="import item art from your Terraria install (auto-detected)"
+    )
+    sp.add_argument("dir", nargs="?", help="explicit Content/Images dir (scanned if omitted)")
+    sp.add_argument("--out", help="default: <repo>/web/public/sprites")
+    sp.add_argument("--yes", action="store_true", help="don't ask which install to use")
+    sp.add_argument("--force", action="store_true", help="overwrite existing PNGs")
+    sp.add_argument(
+        "--bgra", action="store_true", help="swap R and B channels if the colors look wrong"
+    )
+    sp.set_defaults(func=cmd_sprites)
 
     v = sub.add_parser("serve", help="run the web UI + API")
     v.add_argument("--host", default="127.0.0.1")

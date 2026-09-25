@@ -116,4 +116,39 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req),
     }),
+  sprites: () => call<SpritesStatus>("/api/sprites"),
+  spritePreview: (dataset: string) =>
+    call<SpritePreview[]>(`/api/sprites/preview?dataset=${encodeURIComponent(dataset)}`),
+  spriteImport: (path?: string) =>
+    call<{ started: boolean; path: string }>("/api/sprites/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(path ? { path } : {}),
+    }),
+  spriteImportStatus: () => call<SpriteImportStatus>("/api/sprites/import"),
 };
+
+export interface SpriteSource {
+  app: string;
+  path: string;
+  items: number;
+}
+
+export interface SpritesStatus {
+  installed: number;
+  sources: SpriteSource[];
+}
+
+export interface SpriteImportStatus {
+  running: boolean;
+  done: number;
+  total: number;
+  error: string | null;
+  installed: number;
+}
+
+export interface SpritePreview {
+  id: number;
+  name: string;
+  url: string;
+}
