@@ -52,7 +52,7 @@ class NpcSetup:
     """
 
     happiness: dict[int, float] = field(default_factory=dict)
-    discount: bool = False  # Discount Card / Greedy Ring / Shiny Stone... (-20% when buying)
+    discount: bool = False  # Discount Card or Greedy Ring (-20% when buying; they don't stack)
     # Whether happiness also changes what NPCs pay you. TODO(extractor): confirm against
     # Player.GetItemExpectedPrice for every supported version.
     happiness_affects_selling: bool = True
@@ -133,16 +133,20 @@ def sell_price(value: int, adjustment: float) -> int:
 def check_pricing(probe: list[dict]) -> dict:
     """Compare our price formulas with samples of the game's own GetItemExpectedPrice.
 
-    The extractor records ``{"adjustment", "value", "buy", "sell"}`` samples. The game's sell
-    figure may or may not already include the /5, so several readings are tried.
+    The extractor records ``{"adjustment", "value", "discount", "buy", "sell"}`` samples (older
+    dumps have no ``discount`` key). The game's sell figure may or may not already include the /5,
+    so several readings are tried.
     """
     if not probe:
         return {"checked": 0}
     buy_bad = [
         p
         for p in probe
-        if p["buy"] is not None and buy_price(p["value"], p["adjustment"], False) != p["buy"]
+        if p["buy"] is not None
+        and buy_price(p["value"], p["adjustment"], p.get("discount", False)) != p["buy"]
     ]
+    discounted = [p for p in probe if p.get("discount") and p["buy"] is not None]
+    discount_bad = [p for p in buy_bad if p.get("discount")]
 
     def before_div5(p: dict) -> int:
         return int(math.floor(p["value"] / p["adjustment"] + 0.5))
@@ -163,6 +167,8 @@ def check_pricing(probe: list[dict]) -> dict:
         "checked": len(probe),
         "buy_match_rate": 1 - len(buy_bad) / len(probe),
         "buy_mismatches": buy_bad[:5],
+        "discount_checked": len(discounted),
+        "discount_match_rate": 1 - len(discount_bad) / len(discounted) if discounted else None,
         "sell_reading": best if exact else f"closest: {best} ({rates[best]:.0%} of samples)",
         "sell_match_rates": rates,
         "happiness_affects_selling": "ignored" not in best,

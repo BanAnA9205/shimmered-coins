@@ -51,9 +51,9 @@ See [`docs/ALGORITHM.md`](docs/ALGORITHM.md). In short:
 - **Phase 1:** moves form a sparse item × move table. The search finds the best *atomic
   recipes*: buy/craft/shimmer quantities that can't be split into smaller profitable pieces. It
   solves linear programs with HiGHS instead of walking move sequences.
-- **Phase 2:** each top recipe is turned into the most compact ordered sequence: buy everything,
-  run each craft or shimmer once at full quantity, sell all.
-- **Ranking:** results are ranked by growth per action, `ln(1 + gain) / length`.
+- **Phase 2:** each top recipe becomes a tour: buy at each NPC, one shimmer-pool visit for every
+  craft and shimmer, sell all at the happiest NPC. Only travel counts: `L` = places visited.
+- **Ranking:** by growth per trip. The exact score is still being settled (ALGORITHM.md 6.1).
 
 The options below describe the world and NPC setup. They already work and will feed the new engine:
 

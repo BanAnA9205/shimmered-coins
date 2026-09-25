@@ -72,7 +72,7 @@ Stack decisions:
 **Superseded.** The first version searched move sequences step by step, with a branch-and-bound tree, a per-sequence LP and a C++ port. It was replaced by the recipe-based design in [`ALGORITHM.md`](ALGORITHM.md):
 
 - **Phase 1:** ranks atomic recipes over the sparse item × move table with HiGHS. It checks for free-money loops first, then finds the best recipe and uses Lawler ranking for the top K.
-- **Phase 2:** orders each recipe into the most compact sequence and ranks by growth per action, `ln(1 + gain) / length`.
+- **Phase 2:** orders each recipe into the most compact sequence and ranks by growth per trip (places visited; see ALGORITHM.md 5-6).
 
 The old engine code was deleted. `search/quantize.py` (integer plans and inventory replay) is kept for phase 2.
 
