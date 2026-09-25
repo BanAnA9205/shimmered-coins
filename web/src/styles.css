@@ -243,26 +243,50 @@ input[type="range"] {
 }
 
 /* ---- NPCs --------------------------------------------------------------------------------- */
+.npc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px 10px;
+}
+
 .npc {
-  padding: 6px 0;
+  padding: 2px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .npc.absent {
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
 .npc-happy {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-left: 24px;
+  padding-left: 22px;
+}
+
+.npc-adj-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.npc-adj-row input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.npc-adj-input {
+  width: 4.2em;
+  padding: 2px 4px;
+  font-size: 0.85rem;
 }
 
 .npc-zone {
-  margin-top: 4px;
-  padding: 3px 6px;
+  margin-top: 2px;
+  padding: 2px 4px;
   font-size: 0.85rem;
+  width: 100%;
 }
 
 .npc-adj {

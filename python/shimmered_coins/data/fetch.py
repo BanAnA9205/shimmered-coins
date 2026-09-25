@@ -217,7 +217,7 @@ def fetch(
     extract_zip(zip_path, extracted)
 
     version_dir = data_root / label
-    dump_json = version_dir / "dump.json"
+    dump_json = (version_dir / "dump.json").resolve()
     dump_json.parent.mkdir(parents=True, exist_ok=True)
     print(f"extracting game data -> {dump_json} (this reads the assembly; it can take a while)")
     extract_fn(find_server_exe(extracted), dump_json)

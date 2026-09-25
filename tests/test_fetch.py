@@ -152,7 +152,7 @@ def test_cli_fetch_smoke(monkeypatch, tmp_path):
 
     def fake_fetch(version, root, **kw):
         calls["args"] = (version, root, kw)
-        return tmp_path / "db.sqlite", None
+        return tmp_path / "db.sqlite"
 
     monkeypatch.setattr(cli.fetch_mod, "fetch", fake_fetch)
     monkeypatch.setattr(cli.fetch_mod, "data_root", lambda: tmp_path)

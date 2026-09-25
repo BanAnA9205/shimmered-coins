@@ -24,14 +24,37 @@ def build_db(
 
 
 def load_dataset(path: str | Path) -> Dataset:
-    """Load a dataset from an extractor JSON dump or a curated SQLite file."""
-    path = Path(path)
-    if path.is_dir():
-        path = path / "db.sqlite"
-    if path.suffix in (".sqlite", ".db"):
-        return db.load(path)
-    with open(path, encoding="utf-8") as f:
+    """Load a dataset from an extractor JSON dump or a curated SQLite file.
+
+    A relative path that doesn't exist is also tried under the checkout's ``data/`` directory
+    (with or without ``/db.sqlite``), so ``shimcoins search 1.4.5.8`` works from anywhere.
+    """
+    p = Path(path)
+    for cand in _candidates(p):
+        if cand.is_dir():
+            cand = cand / "db.sqlite"
+        if cand.is_file():
+            p = cand
+            break
+    if p.suffix in (".sqlite", ".db"):
+        return db.load(p)
+    with open(p, encoding="utf-8") as f:
         return Dataset.from_dict(json.load(f))
+
+
+def _candidates(p: Path):
+    yield p
+    if p.is_absolute():
+        return
+    root = Path(__file__).resolve().parents[3] / "data"  # the checkout's data dir
+    variants = [p]
+    if p.parts and p.parts[0] == "data":  # "data/1.4.5.8" also as "1.4.5.8"
+        variants.append(Path(*p.parts[1:]))
+    for v in variants:
+        yield root / v
+        if v.suffix not in (".sqlite", ".db", ".json"):
+            yield v / "db.sqlite"
+            yield root / v / "db.sqlite"
 
 
 def apply_overrides(ds: Dataset, overrides: dict[str, Any]) -> Dataset:

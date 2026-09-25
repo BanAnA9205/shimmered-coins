@@ -52,6 +52,7 @@ class Constraints:
 class Graph:
     dataset: Dataset
     transforms: list[Transform]
+    npcs: NpcSetup | None = None  # the setup this graph was built for (phase 2 needs the seller)
     buy_of: dict[int, Transform] = field(default_factory=dict)  # item -> cheapest buy
     sell_of: dict[int, Transform] = field(default_factory=dict)
     consumers: dict[int, list[Transform]] = field(default_factory=dict)  # item -> non-sell users
@@ -143,9 +144,10 @@ def build_graph(
                     return False
         return True
 
-    # Buy: cheapest offer per item among present NPCs.
+    # Buy: one column per (item, NPC) offer, so phase 2 can prefer an NPC already on the tour
+    # over the cheapest offer (docs/ALGORITHM.md 5).
     if BUY in constraints.kinds:
-        best: dict[int, Transform] = {}
+        offers: dict[tuple[int | None, int], Transform] = {}
         for s in ds.shops:
             if s.currency != "coins" or not npcs.present(s.npc):
                 continue
@@ -158,25 +160,31 @@ def build_graph(
             if base <= 0:
                 continue
             price = buy_price(base, npcs.happiness[s.npc], npcs.discount)
+            if price <= 0:
+                continue  # free (value-1, discounted) items: useless to the LP normalization
             ref = f"shop:{s.npc}"
             if npcs.zones_of(s.npc) == ANY_ZONE:  # say which biome the NPC must live in
                 zones = [c[5:] for c in s.conditions if c.lower().startswith("zone:")]
                 if zones:
                     ref += "@" + "+".join(zones)
             t = Transform(0, BUY, (), outs, cost=price, npc=s.npc, limited=s.limited, ref=ref)
-            cur = best.get(s.item)
+            cur = offers.get((s.npc, s.item))
             if cur is None or (price, t.limited) < (cur.cost, cur.limited):
-                best[s.item] = t
+                offers[(s.npc, s.item)] = t
         for item in npcs.travel_stock:
             outs = ((item, 1),)
             it = items.get(item)
             if it is None or it.value <= 0 or not allowed(outs):
                 continue
             price = buy_price(it.value, 1.0, npcs.discount)
-            cur = best.get(item)
+            if price <= 0:
+                continue
+            cur = offers.get((None, item))
             if cur is None or price < cur.cost:
-                best[item] = Transform(0, BUY, (), outs, cost=price, limited=True, ref="travel")
-        raw.extend(best.values())
+                offers[(None, item)] = Transform(
+                    0, BUY, (), outs, cost=price, limited=True, ref="travel"
+                )
+        raw.extend(offers.values())
 
     # Sell: any shop NPC buys anything at value/5 adjusted by the happiest NPC.
     if SELL in constraints.kinds and any(
@@ -212,45 +220,39 @@ def build_graph(
             if outs and allowed(ins, outs):
                 raw.append(Transform(0, SHIMMER, ins, outs, ref=f"shimmer:{s.kind}"))
 
-    return _finalize(ds, _prune(raw))
+    return _finalize(ds, _prune(raw), npcs)
 
 
 def _prune(ts: list[Transform]) -> list[Transform]:
     """Drop transforms that can never be part of a useful sequence.
 
-    Forward: inputs must be obtainable starting from coins (buyable, or produced from such).
-    Backward: at least one output must be convertible back into coins.
+    Forward: inputs must be obtainable starting from buys. Backward: at least one output must be
+    convertible back into coins. Both passes are the sparse reachability in ``search/table.py``
+    (docs/ALGORITHM.md 4.0); this is a thin wrapper.
     """
-    reach: set[int] = set()
-    changed = True
-    while changed:
-        changed = False
-        for t in ts:
-            if t.input_items <= reach and not t.output_items <= reach:
-                reach |= t.output_items
-                changed = True
-    ts = [t for t in ts if t.input_items <= reach]
+    from ..search.table import column_matrix, prune_columns
 
-    liquid: set[int] = {i for t in ts if t.kind == SELL for i in t.input_items}
-    changed = True
-    while changed:
-        changed = False
-        for t in ts:
-            if t.kind != SELL and t.output_items & liquid and not t.input_items <= liquid:
-                liquid |= t.input_items
-                changed = True
-    return [t for t in ts if t.kind == SELL or t.output_items & liquid]
+    item_index: dict[int, int] = {}
+    for t in ts:
+        for i, _ in t.inputs + t.outputs:
+            item_index.setdefault(i, len(item_index))
+    N, is_sell, liquid = column_matrix(ts, item_index)
+    keep = prune_columns(N, liquid, is_sell)
+    return [t for t, k in zip(ts, keep) if k]
 
 
-def _finalize(ds: Dataset, ts: list[Transform]) -> Graph:
+def _finalize(ds: Dataset, ts: list[Transform], npcs: NpcSetup | None = None) -> Graph:
     order = {BUY: 0, CRAFT: 1, SHIMMER: 2, SELL: 3}
     ts.sort(key=lambda t: (order[t.kind], t.inputs, t.outputs, t.ref))
     final = [Transform(i, *_fields(t)) for i, t in enumerate(ts)]
-    g = Graph(ds, final)
+    g = Graph(ds, final, npcs)
     consumers: dict[int, list[Transform]] = defaultdict(list)
     for t in final:
         if t.kind == BUY:
-            g.buy_of[t.outputs[0][0]] = t
+            item = t.outputs[0][0]
+            cur = g.buy_of.get(item)  # helpers keep the cheapest offer per item
+            if cur is None or (t.cost, t.limited) < (cur.cost, cur.limited):
+                g.buy_of[item] = t
         elif t.kind == SELL:
             g.sell_of[t.inputs[0][0]] = t
         else:

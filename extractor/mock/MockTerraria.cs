@@ -177,14 +177,15 @@ namespace Terraria
         public bool ZoneDesert { get; set; }
         public bool ZoneOverworldHeight { get; set; }
 
-        // Mirrors the real signature; the mock formula is deliberately simple.
+        // A literal port of the real Player.GetItemExpectedPrice (1.4.5.8): float32 math,
+        // the discount truncates value*0.8f before happiness, Math.Round is half-to-even.
         public void GetItemExpectedPrice(Item item, out long calcForSelling, out long calcForBuying)
         {
             float adj = Main.ShopHelper.GetShoppingSettings_Adjustment();
             long buy = item.value;
-            if (discountAvailable) buy = (long)(buy * 0.8);
-            calcForBuying = (long)Math.Round(buy * adj);
-            calcForSelling = (long)Math.Round(item.value / adj);
+            if (discountAvailable) buy = (int)(buy * 0.8f);
+            calcForBuying = (long)(int)Math.Round((double)(buy * adj));
+            calcForSelling = (long)(int)Math.Round((double)(item.value / adj));
         }
     }
 

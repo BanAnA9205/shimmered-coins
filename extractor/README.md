@@ -77,8 +77,15 @@ bestiary completion.
 - **Shimmer rules:** the extractor changes the progression flags and world evil, and records which
   flags change the result.
 - **Pricing:** `pricing_probe` in the metadata stores samples of the game's `GetItemExpectedPrice`
-  at different happiness levels, with and without the Discount Card flag. `shimcoins data info`
-  compares them with the engine's formula (`buy_match_rate`, `discount_match_rate`).
+  at different happiness levels. `shimcoins data info` compares them with the engine's formula.
+- **1.4.5.x adapter** (verified against 1.4.5.8): the shop database (`NPCShopDatabase`) was removed
+  in favour of hard-coded `Chest.SetupShop`, so the legacy probing path is used again; shops need
+  a local player and filled `Main.npc` slots; recipes need `Program.SavePath`, loaded
+  localization (`SetLanguage` + `Lang.InitializeLegacyLocalization`), `Recipe.SetupRecipeGroups()`
+  and `ContentSamples` to run first; `RecipeGroup` lost `recipeGroupIDs`/`IconicItemId` (names come
+  from the group's own text, the icon falls back to `DecraftItemId`); `requiredTile` became a
+  single int; the price adjustment moved from `Main.ShopHelper` to the player's
+  `currentShoppingSettings`. The extractor handles both shapes.
 
 `--legacy-shops` forces the pre-1.4.4 shop path, which is useful for debugging.
 

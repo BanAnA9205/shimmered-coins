@@ -66,26 +66,25 @@ def test_parse_coins():
 
 
 def moves_available(capsys) -> int:
-    err = capsys.readouterr().err
-    return int(err.split(" moves available")[0].rsplit(" ", 1)[1])
+    out = capsys.readouterr().out
+    return int(out.split(" moves available")[0].rsplit(" ", 1)[1])
 
 
-def test_cli_build_and_search_stub(tmp_path, capsys):
+def test_cli_build_and_search(tmp_path, capsys):
     db = tmp_path / "db.sqlite"
     assert main(["data", "build", str(TOY), "--out", str(db)]) == 0
     capsys.readouterr()
-    # the tree search is gone; search reports the move graph and exits with 3
-    assert main(["search", str(db), "--npc", "Smith=0.8", "--npc", "Merchant"]) == 3
+    assert main(["search", str(db), "--npc", "Smith=0.8", "--npc", "Merchant"]) == 0
     assert moves_available(capsys) > 0
 
 
 def test_cli_npc_zones(capsys):
     args = ["search", str(TOY), "--npc", "Smith"]
-    assert main(args + ["--npc", "Merchant"]) == 3
+    assert main(args + ["--npc", "Merchant"]) == 0
     plain = moves_available(capsys)
-    assert main(args + ["--npc", "Merchant=1@snow,forest"]) == 3
+    assert main(args + ["--npc", "Merchant=1@snow,forest"]) == 0
     assert moves_available(capsys) > plain  # the snow-only Frost Charm becomes buyable
-    assert main(args + ["--npc", "Merchant", "--travel-stock", "Kit"]) == 3
+    assert main(args + ["--npc", "Merchant", "--travel-stock", "Kit"]) == 0
     assert moves_available(capsys) > plain
     assert main(["data", "info", str(TOY)]) == 0
     info = json.loads(capsys.readouterr().out)

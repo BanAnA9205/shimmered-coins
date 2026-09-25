@@ -11,7 +11,7 @@ import {
 import { ItemPicker } from "./components/ItemPicker";
 import { ResultCard } from "./components/ResultCard";
 
-const ALL_KINDS: Kind[] = ["buy", "craft", "shimmer", "sell"];
+const ALL_KINDS: Kind[] = ["buy", "craft", "shimmer"];
 
 interface Settings {
   dataset: string;
@@ -21,9 +21,10 @@ interface Settings {
   npcs: Record<number, NpcIn>; // present NPC -> happiness price adjustment + biome
   travel: ItemRef[];
   kinds: Kind[];
-  maxSteps: number;
   topN: number;
-  leftover: "discard" | "sell";
+  overhead: number; // fixed per-loop effort c in the score
+  maxPlaces: number; // 0 = any
+  wallet: string; // e.g. "50g", "1p 20g", "500" (copper); "" = unlimited
   allowLoss: boolean;
   timeLimit: number;
   include: ItemRef[];
@@ -40,9 +41,10 @@ const DEFAULTS: Settings = {
   npcs: {},
   travel: [],
   kinds: ALL_KINDS,
-  maxSteps: 4,
   topN: 10,
-  leftover: "discard",
+  overhead: 1,
+  maxPlaces: 0,
+  wallet: "",
   allowLoss: false,
   timeLimit: 30,
   include: [],
@@ -62,7 +64,7 @@ const GROUP_LABEL: Record<string, string> = {
 
 const NEUTRAL: NpcIn = { adjustment: 1, zones: [] };
 
-const STORAGE_KEY = "shimmered-coins.settings.v1";
+const STORAGE_KEY = "shimmered-coins.settings.v2";
 
 function loadSettings(): Settings {
   try {
@@ -79,6 +81,21 @@ function loadSettings(): Settings {
     /* storage unavailable */
   }
   return DEFAULTS;
+}
+
+/** "50g", "1p 20g", "500" -> copper; null when empty or unparsable. */
+function parseCoins(text: string): number | null {
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  if (/^\d+$/.test(t)) return +t;
+  const units: Record<string, number> = { p: 1_000_000, g: 10_000, s: 100, c: 1 };
+  let copper = 0;
+  let hit = false;
+  for (const m of t.matchAll(/(\d+)\s*([pgsc])/g)) {
+    copper += +m[1] * units[m[2]];
+    hit = true;
+  }
+  return hit ? copper : null;
 }
 
 /** Terraria's happiness text for a given shop price adjustment (approximate bands). */
@@ -149,9 +166,10 @@ export default function App() {
         exclude: s.exclude.map((i) => i.id),
         must_use: s.mustUse.map((i) => i.id),
         start: s.start.length ? s.start.map((i) => i.id) : null,
-        max_steps: s.maxSteps,
         top_n: s.topN,
-        leftover: s.leftover,
+        overhead: s.overhead,
+        max_places: s.maxPlaces > 0 ? s.maxPlaces : null,
+        wallet: parseCoins(s.wallet),
         allow_loss: s.allowLoss,
         time_limit: s.timeLimit,
       });
@@ -239,64 +257,82 @@ export default function App() {
             <p className="muted">
               Any shop NPC buys anything; only the happiest one's price matters when selling.
             </p>
-            {info?.npcs.map((n) => {
-              const present = n.id in s.npcs;
-              const npc = s.npcs[n.id] ?? NEUTRAL;
-              const update = (patch: Partial<NpcIn>) =>
-                set("npcs", { ...s.npcs, [n.id]: { ...npc, ...patch } });
-              const zoneValue = npc.zones === "any" ? "any" : (npc.zones[0] ?? "");
-              return (
-                <div key={n.id} className={`npc ${present ? "" : "absent"}`}>
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={present}
-                      onChange={() => {
-                        const next = { ...s.npcs };
-                        if (present) delete next[n.id];
-                        else next[n.id] = NEUTRAL;
-                        set("npcs", next);
-                      }}
-                    />
-                    <span className="npc-name">{n.name}</span>
-                  </label>
-                  {present && (
-                    <div className="npc-happy">
+            <div className="npc-grid">
+              {info?.npcs.map((n) => {
+                const present = n.id in s.npcs;
+                const npc = s.npcs[n.id] ?? NEUTRAL;
+                const update = (patch: Partial<NpcIn>) =>
+                  set("npcs", { ...s.npcs, [n.id]: { ...npc, ...patch } });
+                const zoneValue = npc.zones === "any" ? "any" : (npc.zones[0] ?? "");
+                const setAdj = (raw: string) => {
+                  const v = +raw;
+                  update({ adjustment: Number.isFinite(v) ? Math.min(1.5, Math.max(0.75, v)) : 1 });
+                };
+                return (
+                  <div key={n.id} className={`npc ${present ? "" : "absent"}`}>
+                    <label className="check">
                       <input
-                        type="range"
-                        min={0.75}
-                        max={1.5}
-                        step={0.01}
-                        value={npc.adjustment}
-                        onChange={(e) => update({ adjustment: +e.target.value })}
+                        type="checkbox"
+                        checked={present}
+                        onChange={() => {
+                          const next = { ...s.npcs };
+                          if (present) delete next[n.id];
+                          else next[n.id] = NEUTRAL;
+                          set("npcs", next);
+                        }}
                       />
-                      <span className="npc-adj" title="shop price adjustment">
-                        ×{npc.adjustment.toFixed(2)} · {mood(npc.adjustment)}
-                      </span>
-                      {info.zones.length > 0 && (
-                        <select
-                          className="t-input npc-zone"
-                          title="where the NPC lives: biome-specific stock depends on it"
-                          value={zoneValue}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            update({ zones: v === "any" ? "any" : v ? [v] : [] });
-                          }}
-                        >
-                          <option value="">no special biome</option>
-                          {info.zones.map((z) => (
-                            <option key={z} value={z}>
-                              lives in {z}
-                            </option>
-                          ))}
-                          <option value="any">anywhere (what-if)</option>
-                        </select>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                      <span className="npc-name">{n.name}</span>
+                    </label>
+                    {present && (
+                      <div className="npc-happy">
+                        <div className="npc-adj-row">
+                          <input
+                            type="range"
+                            min={0.75}
+                            max={1.5}
+                            step={0.01}
+                            value={npc.adjustment}
+                            onChange={(e) => setAdj(e.target.value)}
+                          />
+                          <input
+                            className="t-input npc-adj-input"
+                            type="number"
+                            min={0.75}
+                            max={1.5}
+                            step={0.01}
+                            value={npc.adjustment}
+                            title="shop price adjustment (0.75 happiest .. 1.5)"
+                            onChange={(e) => setAdj(e.target.value)}
+                          />
+                        </div>
+                        <span className="npc-adj" title="shop price adjustment">
+                          {mood(npc.adjustment)}
+                        </span>
+                        {info.zones.length > 0 && (
+                          <select
+                            className="t-input npc-zone"
+                            title="where the NPC lives: biome-specific stock depends on it"
+                            value={zoneValue}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              update({ zones: v === "any" ? "any" : v ? [v] : [] });
+                            }}
+                          >
+                            <option value="">no biome</option>
+                            {info.zones.map((z) => (
+                              <option key={z} value={z}>
+                                {z}
+                              </option>
+                            ))}
+                            <option value="any">anywhere</option>
+                          </select>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
             {info && (
               <ItemPicker
                 dataset={s.dataset}
@@ -314,16 +350,6 @@ export default function App() {
             <h2>Search</h2>
             <div className="row">
               <div className="field">
-                <label className="field-label">Max moves: {s.maxSteps}</label>
-                <input
-                  type="range"
-                  min={1}
-                  max={8}
-                  value={s.maxSteps}
-                  onChange={(e) => set("maxSteps", +e.target.value)}
-                />
-              </div>
-              <div className="field">
                 <label className="field-label">Show top</label>
                 <input
                   className="t-input small"
@@ -332,6 +358,29 @@ export default function App() {
                   max={100}
                   value={s.topN}
                   onChange={(e) => set("topN", Math.max(1, +e.target.value))}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label">Loop overhead (c)</label>
+                <input
+                  className="t-input small"
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.5}
+                  value={s.overhead}
+                  onChange={(e) => set("overhead", Math.max(0, +e.target.value))}
+                />
+              </div>
+              <div className="field">
+                <label className="field-label">Max places</label>
+                <input
+                  className="t-input small"
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={s.maxPlaces}
+                  onChange={(e) => set("maxPlaces", Math.max(0, +e.target.value))}
                 />
               </div>
               <div className="field">
@@ -345,16 +394,18 @@ export default function App() {
                   onChange={(e) => set("timeLimit", Math.max(1, +e.target.value))}
                 />
               </div>
+            </div>
+            <div className="row">
               <div className="field">
-                <label className="field-label">Leftover items</label>
-                <select
-                  className="t-input"
-                  value={s.leftover}
-                  onChange={(e) => set("leftover", e.target.value as Settings["leftover"])}
-                >
-                  <option value="discard">worth nothing</option>
-                  <option value="sell">worth their sell price</option>
-                </select>
+                <label className="field-label">Wallet</label>
+                <input
+                  className="t-input small"
+                  type="text"
+                  placeholder="e.g. 50g"
+                  value={s.wallet}
+                  title="drop recipes you can't afford, scale the rest to your wallet"
+                  onChange={(e) => set("wallet", e.target.value)}
+                />
               </div>
             </div>
             <div className="row">
@@ -421,16 +472,22 @@ export default function App() {
           {resp && (
             <section className="results">
               <p className="muted stats">
-                {resp.version}: {resp.moves_available} possible moves · {resp.stats.nodes} nodes
-                searched ({resp.stats.pruned} pruned) in {resp.stats.elapsed.toFixed(2)}s
+                {resp.version}: {resp.moves_available} possible moves · {resp.stats.solves} LP solves
+                in {resp.stats.elapsed.toFixed(2)}s
                 {!resp.stats.complete && (
                   <span className="warn"> · stopped at the limit, results may not be optimal</span>
                 )}
               </p>
+              {resp.loops.map((l, i) => (
+                <div className="panel empty" key={`loop${i}`}>
+                  Infinite money loop (no purchase needed, repeatable forever):{" "}
+                  {l.moves.map((m) => m.text).join("; ")}
+                </div>
+              ))}
               {resp.results.length === 0 && (
                 <div className="panel empty">
-                  No profitable chain within {s.maxSteps} moves. Try more moves, other NPCs or
-                  progression flags, or tick "show losing chains too".
+                  No profitable recipe. Try other NPCs, progression flags or biomes, or tick
+                  "show losing chains too".
                 </div>
               )}
               {resp.results.map((r, i) => (

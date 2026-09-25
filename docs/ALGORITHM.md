@@ -1,8 +1,10 @@
 # Search algorithm
 
-**Status:** design agreed, not implemented yet. The earlier step-by-step tree search (and its C++
-core) was removed. `shimcoins search` and `POST /api/search` report "engine being rebuilt" until
-phase 1 lands. Section 10 is the implementation plan.
+**Status:** phase 1 and phase 2 are implemented (`search/table.py`, `search/recipes.py`,
+`search/schedule.py`, `search/engine.py`), verified against the toy world and a real 1.4.5.8
+dataset. Not implemented yet: the `L`-level Pareto front as a MILP (6.2 — `--max-places` is a
+post-filter for now), the neutral catalogue (6.3), and the parallel top-K process pool. Section
+10 tracks the implementation plan.
 
 The engine works in two phases:
 
@@ -330,7 +332,12 @@ Settled:
 - one buy column per (item, NPC);
 - the Discount Card / Greedy Ring: −20% on buys, applied before happiness, and not stacking. The
   extractor's pricing probe records samples with and without it, so `shimcoins data info` checks
-  the formula against the real game (`discount_match_rate`).
+  the formula against the real game (`discount_match_rate`). **Measured on 1.4.5.8 (50/50
+  samples exact):** all arithmetic is float32; the discount is a truncating cast
+  (`(int)(value * 0.8f)`) applied *before* happiness; the happiness step is `Math.Round`
+  (half-to-even) followed by a truncating cast; selling is `Math.Round(value / adjustment)`
+  with the // 5 applied at the sale itself. Mirrored in `model/world.py` (`buy_price`,
+  `sell_price`).
 
 ## 10. Implementation plan
 1. **Dependencies:** add `highspy` to the package. `scipy` stays (sparse).

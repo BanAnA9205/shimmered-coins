@@ -6,13 +6,24 @@ import argparse
 import json
 import re
 import sys
+from pathlib import Path
 
 from .data import build_db, diff, load_dataset
 from .data import fetch as fetch_mod
 from .data.fetch import FetchError
 from .data.schema import Dataset
-from .model import ANY_ZONE, KINDS, Constraints, NpcSetup, WorldConfig, build_graph, check_pricing
+from .model import (
+    ANY_ZONE,
+    KINDS,
+    SELL,
+    Constraints,
+    NpcSetup,
+    WorldConfig,
+    build_graph,
+    check_pricing,
+)
 from .model.conditions import flag_groups, zones
+from .search import SearchParams, search
 
 _COIN_RE = re.compile(r"(\d+)\s*([pgsc])", re.I)
 _COIN_UNITS = {"p": 1_000_000, "g": 10_000, "s": 100, "c": 1}
@@ -37,23 +48,34 @@ def _items(ds: Dataset, names: list[str] | None) -> frozenset[int]:
 
 
 def _npcs(
-    ds: Dataset, specs: list[str] | None, all_at: float | None
+    ds: Dataset, specs: list[str] | None, all_at: str | None
 ) -> tuple[dict[int, float], dict[int, frozenset[str] | str]]:
-    """Parse ``NAME[=ADJ][@ZONE,ZONE|@any]`` specs into happiness and zone maps."""
+    """Parse ``NAME[=ADJ][@ZONE,ZONE|@any]`` specs into happiness and zone maps.
+
+    ``all_at`` (from ``--all-npcs``) is ``ADJ`` or ``ADJ@any``, applied to every shop NPC.
+    """
     happy: dict[int, float] = {}
     npc_zones: dict[int, frozenset[str] | str] = {}
+
+    def set_zones(npc: int, where: str) -> None:
+        where = where.strip().lower()
+        npc_zones[npc] = (
+            ANY_ZONE if where == ANY_ZONE else frozenset(z.strip() for z in where.split(","))
+        )
+
     if all_at is not None:
-        happy = {n.id: all_at for n in ds.npcs.values() if n.has_shop}
+        head, _, where = all_at.partition("@")
+        happy = {n.id: float(head) for n in ds.npcs.values() if n.has_shop}
+        if where:
+            for npc in happy:
+                set_zones(npc, where)
     for spec in specs or []:
         head, _, where = spec.partition("@")
         name, _, adj = head.partition("=")
         npc = int(name) if name.isdigit() else ds.npc_by_name(name).id
         happy[npc] = float(adj) if adj else 1.0
         if where:
-            where = where.strip().lower()
-            npc_zones[npc] = (
-                ANY_ZONE if where == ANY_ZONE else frozenset(z.strip() for z in where.split(","))
-            )
+            set_zones(npc, where)
     return happy, npc_zones
 
 
@@ -80,7 +102,7 @@ def cmd_data_fetch(a: argparse.Namespace) -> int:
             return 2
         version = fetch_mod.choose_version()
     try:
-        db, _ = fetch_mod.fetch(
+        db = fetch_mod.fetch(
             version,
             fetch_mod.data_root(),
             confirm=None if a.yes else _confirm,
@@ -124,6 +146,28 @@ def cmd_data_info(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_data_sprites(a: argparse.Namespace) -> int:
+    from .data.sprites import import_sprites
+
+    if not Path(a.dir).is_dir():
+        print(f"not a directory: {a.dir}", file=sys.stderr)
+        return 2
+    out = Path(a.out) if a.out else fetch_mod.repo_root() / "web" / "public" / "sprites"
+    try:
+        done, skipped = import_sprites(Path(a.dir), out, bgra=a.bgra, force=a.force)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"sprites: {e}", file=sys.stderr)
+        return 2
+    msg = f"wrote {done} sprite(s) to {out}"
+    if skipped:
+        msg += f" ({skipped} already present, use --force to redo)"
+    if a.bgra:
+        msg += " (R/B channels swapped)"
+    print(msg)
+    print("restart 'shimcoins serve' or hard-refresh the page to see them")
+    return 0
+
+
 def cmd_data_diff(a: argparse.Namespace) -> int:
     d = diff(load_dataset(a.a), load_dataset(a.b))
     if a.json:
@@ -153,21 +197,74 @@ def cmd_search(a: argparse.Namespace) -> int:
         travel_stock=_items(ds, a.travel_stock),
     )
     kinds = frozenset(a.kinds.split(",")) if a.kinds else frozenset(KINDS)
+    kinds |= {SELL}  # selling is implicit: the residue is sold at the end
     cons = Constraints(
         kinds=kinds,
         include_items=_items(ds, a.include) if a.include else None,
         exclude_items=_items(ds, a.exclude),
     )
     g = build_graph(ds, world, npcs, cons)
-    # The step-by-step tree search was removed; the recipe-based engine (docs/ALGORITHM.md)
-    # replaces it. Until it lands, report what the search would work on.
-    print(
-        f"{ds.version}: {len(g.transforms)} moves available for this world and NPC setup.\n"
-        "The search engine is being rebuilt around recipes (see docs/ALGORITHM.md); "
-        "'shimcoins search' will return results again once phase 1 lands.",
-        file=sys.stderr,
+    params = SearchParams(
+        top=a.top,
+        overhead=a.overhead,
+        min_gain=a.min_gain,
+        allow_loss=a.allow_loss,
+        must_use=_items(ds, a.must_use),
+        start_items=_items(ds, a.start) if a.start else None,
+        wallet=a.wallet,
+        max_places=a.max_places,
+        time_limit=a.time_limit,
     )
-    return 3
+    rep = search(g, params)
+    if a.json:
+        print(
+            json.dumps(
+                {
+                    "version": ds.version,
+                    "stats": rep.stats.__dict__,
+                    "loops": [
+                        {"moves": [{"kind": m.transform.kind, "text": m.text} for m in moves]}
+                        for moves in rep.loops
+                    ],
+                    "results": [
+                        {
+                            "gain": r.gain,
+                            "lp_gain": r.lp_gain,
+                            "capital": r.capital,
+                            "profit": r.profit,
+                            "length": r.length,
+                            "places": r.places,
+                            "score": r.score,
+                            "per_trip": r.per_trip,
+                            "one_shot": r.one_shot,
+                            "moves": [
+                                {"kind": m.transform.kind, "batches": m.batches, "text": m.text}
+                                for m in r.moves
+                            ],
+                            "leftover": {g.name(i): c for i, c in r.leftover.items()},
+                        }
+                        for r in rep.results
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 0
+    s = rep.stats
+    print(
+        f"{ds.version}: {len(g.transforms)} moves available; {s.solves} LP solves "
+        f"({s.loops} free loops) in {s.elapsed:.2f}s"
+        + ("" if s.complete else "  [stopped early: limit reached]")
+    )
+    for moves in rep.loops:
+        print("\ninfinite money loop (no purchase needed, repeatable forever):")
+        for m in moves:
+            print(f"  {m.text}")
+    if not rep.results:
+        print("no profitable recipe" + ("" if a.allow_loss else " (try --allow-loss)"))
+    for k, r in enumerate(rep.results, 1):
+        print(f"\n#{k} {r.summary(g)}")
+    return 0
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
@@ -209,6 +306,14 @@ def build_parser() -> argparse.ArgumentParser:
     i = d.add_parser("info", help="summarize a dataset")
     i.add_argument("source")
     i.set_defaults(func=cmd_data_info)
+    sp = d.add_parser("sprites", help="import Item_*.xnb item art from a Terraria install")
+    sp.add_argument("dir", help="the game's Content/Images directory")
+    sp.add_argument("--out", help="default: <repo>/web/public/sprites")
+    sp.add_argument("--force", action="store_true", help="overwrite existing PNGs")
+    sp.add_argument(
+        "--bgra", action="store_true", help="swap R and B channels if the colors look wrong"
+    )
+    sp.set_defaults(func=cmd_data_sprites)
     df = d.add_parser("diff", help="what changed between two versions")
     df.add_argument("a")
     df.add_argument("b")
@@ -227,24 +332,40 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument(
         "--travel-stock", action="append", help="item the Travelling Merchant sells today"
     )
-    s.add_argument("--all-npcs", type=float, metavar="ADJ", help="all shop NPCs present at ADJ")
+    s.add_argument(
+        "--all-npcs",
+        metavar="ADJ[@ZONES]",
+        help="all shop NPCs present at ADJ, optionally living somewhere (e.g. 0.75@any)",
+    )
     s.add_argument("--discount", action="store_true", help="Discount Card equipped")
     s.add_argument("--flag", action="append", help="world flag, e.g. hardmode, downedMoonLord")
     s.add_argument("--no-shimmer", action="store_true")
-    s.add_argument("--max-steps", type=int, default=4)
-    s.add_argument("--top", type=int, default=10)
-    s.add_argument("--leftover", choices=["discard", "sell"], default="discard")
+    s.add_argument("--top", type=int, default=10, help="number of recipes to report")
+    s.add_argument(
+        "--overhead",
+        type=float,
+        default=1.0,
+        metavar="C",
+        help="fixed per-loop effort c in the score ln(1+gain)/(L+c); 0 = pure compounding",
+    )
+    s.add_argument(
+        "--max-places", type=int, help="drop recipes whose tour visits more than this many places"
+    )
     s.add_argument("--min-gain", type=float, default=0.0)
-    s.add_argument("--allow-loss", action="store_true")
-    s.add_argument("--kinds", help=f"comma list from {','.join(KINDS)}")
+    s.add_argument("--allow-loss", action="store_true", help="also report the least-bad recipes")
+    s.add_argument("--kinds", help="comma list from buy,craft,shimmer (selling is always implicit)")
     s.add_argument("--include", action="append", help="only use these items (repeatable)")
     s.add_argument("--exclude", action="append", help="never use these items")
-    s.add_argument("--must-use", action="append", help="sequence must involve these items")
-    s.add_argument("--start", action="append", help="first buy must be one of these items")
-    s.add_argument("--budget", type=parse_coins, help="scale plans up to this, e.g. '5p 20g'")
-    s.add_argument("--exhaustive", action="store_true", help="no pruning (slow; for checking)")
-    s.add_argument("--max-nodes", type=int, default=500_000)
-    s.add_argument("--time-limit", type=float, default=60.0)
+    s.add_argument("--must-use", action="append", help="recipe must involve these items")
+    s.add_argument("--start", action="append", help="only buy these items")
+    s.add_argument(
+        "--wallet",
+        type=parse_coins,
+        metavar="COINS",
+        help="your wallet, e.g. '50g': recipes needing more are dropped, the rest are shown "
+        "scaled to it (one-shot recipes stay minimal)",
+    )
+    s.add_argument("--time-limit", type=float, default=30.0)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_search)
 

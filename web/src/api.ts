@@ -1,4 +1,4 @@
-export type Kind = "buy" | "sell" | "craft" | "shimmer";
+export type Kind = "buy" | "craft" | "shimmer";
 
 export interface DatasetSummary {
   id: string;
@@ -36,7 +36,7 @@ export interface Stack {
 }
 
 export interface MoveOut {
-  kind: Kind;
+  kind: Kind | "sell"; // "sell" = the final sell-all step
   batches: number;
   text: string;
   inputs: Stack[];
@@ -51,8 +51,14 @@ export interface ResultOut {
   gain: number;
   lp_gain: number;
   capital: number;
+  capital_text: string;
   profit: number;
-  repeatable: boolean;
+  profit_text: string;
+  length: number;
+  places: string[];
+  score: number;
+  per_trip: number;
+  one_shot: boolean;
   moves: MoveOut[];
   leftover: Stack[];
 }
@@ -60,7 +66,8 @@ export interface ResultOut {
 export interface SearchResponse {
   version: string;
   moves_available: number;
-  stats: { nodes: number; lp_solves: number; pruned: number; elapsed: number; complete: boolean };
+  stats: { solves: number; loops: number; unschedulable: number; elapsed: number; complete: boolean };
+  loops: { moves: MoveOut[] }[];
   results: ResultOut[];
 }
 
@@ -76,9 +83,10 @@ export interface SearchRequest {
   exclude: number[];
   must_use: number[];
   start: number[] | null;
-  max_steps: number;
   top_n: number;
-  leftover: "discard" | "sell";
+  overhead: number;
+  max_places: number | null;
+  wallet: number | null;
   allow_loss: boolean;
   time_limit: number;
 }

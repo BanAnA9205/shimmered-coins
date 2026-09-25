@@ -1,10 +1,20 @@
-"""Search engine.
+"""Search engine: recipes over the item x move table (docs/ALGORITHM.md).
 
-The step-by-step tree search was removed in favour of the recipe-based design in
-docs/ALGORITHM.md (phase 1: LP/MILP over recipes with HiGHS; phase 2: ordering). Only the
-integer-plan helpers remain; they are reused by phase 2.
+Phase 1 finds and ranks atomic recipes with LPs (HiGHS); phase 2 orders each recipe into a
+tour of places and scores it by growth per trip. ``quantize.py`` holds the integer replay.
 """
 
+from .engine import Move, Result, SearchParams, SearchReport, SearchStats, search
 from .quantize import IntegerPlan, quantize, simulate
 
-__all__ = ["IntegerPlan", "quantize", "simulate"]
+__all__ = [
+    "IntegerPlan",
+    "Move",
+    "Result",
+    "SearchParams",
+    "SearchReport",
+    "SearchStats",
+    "quantize",
+    "search",
+    "simulate",
+]

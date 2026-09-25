@@ -141,5 +141,5 @@ def test_cli_pipeline(dump, tmp_path, capsys):
     db = tmp_path / "db.sqlite"
     assert main(["data", "build", str(dump), "--out", str(db)]) == 0
     assert load_dataset(db).condition_info("zone:snow").description == "In Snow"
-    assert main(["search", str(db), "--npc", "Merchant"]) == 3
-    assert "9.9.9.9" in capsys.readouterr().err
+    assert main(["search", str(db), "--npc", "Merchant"]) == 0
+    assert "9.9.9.9" in capsys.readouterr().out
