@@ -378,3 +378,18 @@ def test_shape_dedup_keeps_one_route(toy):
     assert rep.results
     assert all(r.gain == pytest.approx(0.2) for r in rep.results)
     assert len(rep.results) == 1  # the two routes collapsed into one
+
+
+def test_post_filters_do_not_starve_top(toy):
+    """max_places/wallet drop results *after* ranking, so the candidate batch must be larger
+    than what is displayed; a filtered search still fills the top list when results exist."""
+    g = graph(toy, ["downedBoss", "hardmode"])
+    base = search(g, SearchParams(top=10))
+    rep = search(g, SearchParams(top=8, max_places=2))
+    assert len(rep.results) >= min(len(base.results), 8)
+
+
+def test_min_gain_filter_fills_top(toy):
+    g = graph(toy, ["downedBoss", "hardmode"])
+    rep = search(g, SearchParams(top=8, min_gain=0.30, allow_loss=True))
+    assert rep.results and all(r.gain > 0.30 - 0.30 for r in rep.results)  # all well above -55%

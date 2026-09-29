@@ -156,3 +156,24 @@ def test_real_world_chest_contents_make_sense(real_world):
     w = parse_world(p)
     all_items = {i for c in w.chests for i, _, _ in c.items}
     assert len(all_items) > 50  # a real storage world has variety
+
+
+def test_corrupt_npc_section_raises_cleanly(tmp_path):
+    data, positions = build_wld()
+    d = bytearray(data)
+    # flip the npc terminator (final `00` of the section) so the loop keeps reading
+    end = positions[5] - 1
+    d[end] = 1
+    p = tmp_path / "corrupt.wld"
+    p.write_bytes(bytes(d))
+    try:
+        parse_world(p)
+    except (ValueError, struct.error, IndexError):
+        pass  # any *clean* exception: no hang, no huge bogus npc list
+    else:
+        pytest.fail("corrupt npc section parsed without an error")
+    # a benign parse still works and the bound does not clip real files
+    ok = tmp_path / "ok.wld"
+    ok.write_bytes(data)
+    w = parse_world(ok)
+    assert [n.type for n in w.npcs] == [22, 17]

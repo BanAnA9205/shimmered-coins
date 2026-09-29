@@ -112,7 +112,7 @@ def cmd_data_fetch(a: argparse.Namespace) -> int:
     except FetchError as e:
         print(f"fetch failed: {e}", file=sys.stderr)
         return 2
-    print(f"\nnext: shimcoins search {db} --all-npcs 1 --max-steps 5")
+    print(f"\nnext: shimcoins search {db} --all-npcs 0.75 --flag hardmode --top 5")
     return 0
 
 
@@ -301,7 +301,7 @@ def cmd_world(a: argparse.Namespace) -> int:
         f"{len(w.chests)} chests ({len(filled)} with {total} items), {len(w.npcs)} npcs"
     )
     for n in w.npcs:
-        npc = _dataset_npc_name(n.type) if a.dataset else None
+        npc = _dataset_npc_name(a.dataset, n.type) if a.dataset else None
         print(
             f"  npc {n.type:4} {n.name:16} home=({n.home_x},{n.home_y})"
             + (" homeless" if n.homeless else "")
@@ -317,12 +317,13 @@ def cmd_world(a: argparse.Namespace) -> int:
     return 0
 
 
-def _dataset_npc_name(type_id: int) -> str | None:
+def _dataset_npc_name(dataset: str, type_id: int) -> str | None:
     from .data import load_dataset as _load
 
-    if not Path("data/1.4.5.8").is_dir():
+    try:
+        ds = _load(dataset)
+    except Exception:  # unparseable dataset: names are cosmetic, not worth failing the command
         return None
-    ds = _load("data/1.4.5.8")
     n = ds.npcs.get(type_id)
     return n.name if n else None
 

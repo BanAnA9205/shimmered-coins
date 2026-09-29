@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # positions[] index -> section (validated against LoadWorld_Version2's call order)
-SEC_HEADER, SEC_TILES, SEC_CHESTS, SEC_SIGNS, SEC_NPCS = 0, 1, 2, 3, 4
+SEC_HEADER, SEC_TILES, SEC_CHESTS, SEC_SIGNS, SEC_NPCS, SEC_DUMMIES = 0, 1, 2, 3, 4, 5
 
 
 @dataclass
@@ -131,6 +131,9 @@ def parse_world(path: str | Path) -> World:
         w.chests.append(Chest(x, y, cname, items))
 
     # town npcs
+    npcs_end = (
+        positions[SEC_DUMMIES] if len(positions) > SEC_DUMMIES else len(d)
+    )  # corrupt files must not walk us off the section
     p = positions[SEC_NPCS]
     (shimmered,) = struct.unpack_from("<i", d, p)
     p += 4
@@ -154,6 +157,8 @@ def parse_world(path: str | Path) -> World:
             p += 4  # townNpcVariationIndex
         p += 1  # homelessDespawn
         w.npcs.append(TownNpc(npc_type, given, bool(homeless), home_x, home_y))
+        if p > npcs_end:
+            raise ValueError(f"{path}: corrupt npc section (walked past {npcs_end})")
         more = d[p]
         p += 1
     return w

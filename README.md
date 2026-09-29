@@ -9,7 +9,9 @@ With the introduction of the Shimmering mechanic in Terraria, many material loop
 
 # Status
 
-Early MVP. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
+Early MVP, now a crafting assistant in the making. **[`docs/STATUS.md`](docs/STATUS.md) is the
+where-are-we summary**; the roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the engine design
+in [`docs/ALGORITHM.md`](docs/ALGORITHM.md).
 
 - [x] Dataset schema, SQLite storage, curation overrides, version diff ([`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md))
 - [x] Move graph: buy / sell / craft / shimmer, with NPC happiness pricing and world conditions

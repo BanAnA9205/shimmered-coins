@@ -148,13 +148,15 @@ def _loop_model(t: Table, banned: set[int], rev: np.ndarray) -> highspy.Highs:
     return h
 
 
-def find_free_loops(solver: Solver) -> list[Recipe]:
+def find_free_loops(solver: Solver, deadline: float | None = None) -> list[Recipe]:
     """4.1: zero-cost item-growing cycles (gain would be infinite). Bans each loop's support."""
     t = solver.t
     rev = solver.rev
     loops: list[Recipe] = []
     banned: set[int] = set()
     for _ in range(50):
+        if deadline is not None and time.monotonic() > deadline:
+            break
         h = _loop_model(t, banned, rev)
         h.run()
         solver.solves += 1

@@ -184,8 +184,13 @@ def search(g: Graph, params: SearchParams = SearchParams()) -> SearchReport:
     deadline = start + params.time_limit if params.time_limit is not None else None
     table = build_table(g, params.start_items)
     solver = Solver(table, must_use=params.must_use)
-    loops = find_free_loops(solver)
-    recipes = top_k(solver, params.top, deadline)
+    loops = find_free_loops(solver, deadline)
+    # Post-filters (max_places, wallet, min_gain) drop recipes, so candidate batches must be
+    # bigger than what is displayed -- otherwise a filter can leave fewer results than exist.
+    k = params.top
+    if params.max_places is not None or params.wallet is not None or params.min_gain > 0:
+        k = min(5 * params.top, 200)
+    recipes = top_k(solver, k, deadline)
     if params.must_use:
         # Must-use rows can force a sum of atomic recipes; split it into its parts (4.3.4).
         # The parts are solved without the must rows: the sum already satisfies them.
