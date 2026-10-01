@@ -89,8 +89,12 @@ def lawler(solve, polish, k: int, deadline: float | None, stop_gain: float | Non
     """Best-first Lawler/Murty ranking over region optima, deduplicated after ``polish``.
 
     ``solve(banned, forced)`` returns a region's optimum (or None); ``polish(r)`` the recipe to
-    report for it. Regions are always split on the optimum's own key, even when its polished
-    form duplicates an earlier result -- skipping the split would lose the whole region.
+    report for it. Regions are always split, so no region is ever dropped silently, but on the
+    *polished* key: the raw optimum of a region with forced columns sits at their EPS bounds
+    (plus arbitrary equal-price substitutes) -- a key of noise. Splitting on it merely pivots
+    the LP to the next substitute at the same gain, flooding the queue with thousands of
+    near-identical regions. The polished key names the economic core; banning its elements
+    leaves the whole equivalence class at once.
     """
     first = solve(frozenset(), ())
     if first is None or not first.support():
@@ -108,10 +112,12 @@ def lawler(solve, polish, k: int, deadline: float | None, stop_gain: float | Non
         if stop_gain is not None and r.gain <= stop_gain:
             break  # best-first: nothing left anywhere beats the floor
         shown = polish(r)
-        if shown.key() not in seen and shown.support():
+        if not shown.support():
+            continue
+        if shown.key() not in seen:
             seen.add(shown.key())
             out.append(shown)
-        key = r.key()
+        key = shown.key()
         for i, e in enumerate(key):
             if deadline is not None and time.monotonic() > deadline:
                 break

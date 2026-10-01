@@ -657,8 +657,9 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
             if plan_col is not None:
                 solver.ban({plan_col})
 
-    filters = params.min_profit > 0 or params.must_use or not params.show_liquidation
-    recipes = solver.top_k(params.top * 3 if filters else params.top, deadline)
+    # _finalize_plan can drop candidates (their integerized batch needs more items than
+    # the stock actually holds), so always draw three times the requested top
+    recipes = solver.top_k(params.top * 3, deadline)
     seller = g.npcs.happiest_npc() if g.npcs is not None else None
 
     results: list[PlanResult] = []
