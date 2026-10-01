@@ -282,3 +282,31 @@ def test_no_combined_plan_when_it_adds_nothing():
     g = _g(ds, stock={2: 10, 3: 20})
     rep = plan(g, {2: 10, 3: 20}, PlanParams(top=3))
     assert len(rep.results) == 1 and rep.combined is None
+
+
+def test_combined_plan_refuses_an_unbounded_cycle():
+    """Moves that close a value-growing cycle (Ore -> Gem by shimmer, Gem -> 2 Ore by craft)
+    make the combined program unbounded; HiGHS still hands back some point, which must not be
+    shown as a plan. Normally loop detection bans the cycle first; this guards the case where
+    it stopped early."""
+    from shimmered_coins.search.plan import build_plan_table, combine
+
+    ds = Dataset.from_dict(
+        {
+            "version": "loop",
+            "items": [
+                {"id": 1, "name": "Ore", "value": 100},
+                {"id": 3, "name": "Gem", "value": 1000},
+            ],
+            "recipes": [
+                {"id": 0, "result": 1, "result_stack": 2, "ingredients": [{"item": 3, "count": 1}]}
+            ],
+            "shops": [{"npc": 1, "item": 1}],
+            "shimmer": [{"kind": "transmute", "item": 1, "count": 1, "outputs": [[3, 1]]}],
+            "npcs": [{"id": 1, "name": "Merchant"}],
+        }
+    )
+    g = _g(ds, stock={1: 1})
+    table = build_plan_table(g, {1: 1}, [], 0)
+    every_move = tuple(range(len(table.cols)))
+    assert combine(g, table, [every_move], {1: 1}, PlanParams(wallet=0), None, 2.0) is None

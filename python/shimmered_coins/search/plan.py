@@ -598,6 +598,11 @@ def combine(
             1, [-inf], [float(max(params.kills, 0))], len(farmed), [0], farmed, [1.0] * len(farmed)
         )
     h.run()
+    status = h.modelStatusToString(h.getModelStatus()).lower()
+    if "unbounded" in status:
+        # moves from different plans close a value-growing cycle (loop detection stopped
+        # early): any point HiGHS returns is arbitrary, so there is no honest plan to show
+        return None
     if h.getInfo().primal_solution_status != 2:  # no feasible point found
         return None
     x = h.getSolution().col_value
