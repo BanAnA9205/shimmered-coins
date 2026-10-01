@@ -3,8 +3,14 @@
 A recipe is a column vector ``v >= 0`` with ``N v >= 0`` and ``cost . v > 0``; its gain is
 ``p'(N v) / (cost . v) - 1``. Fixing ``cost . v = 1`` makes "maximize revenue" a plain LP whose
 optimal vertices are the *atomic* recipes. Top-K uses Lawler/Murty ranking: the support of the
-best recipe is split into disjoint sub-problems ("column t banned; t_1..t_{i-1} forced in"), each
+best recipe is split into disjoint sub-problems ("element e banned; e_1..e_{i-1} forced in"), each
 one LP, all in a priority queue by optimum.
+
+A recipe's identity (its partition *key*) is its moves **and** the items it ends up holding
+(``N v > 0``, the residue that is sold). Moves alone are not enough: "buy Ore, shimmer to Gem,
+sell Gem" uses a subset of the moves of "buy Ore, shimmer, craft Bar, craft Ring, sell Ring",
+so partitioning on moves alone throws the Ring recipe away. With the residue in the key the two
+differ (Gem vs Ring is sold), as in elementary flux modes with explicit outflows.
 """
 
 from __future__ import annotations
@@ -28,12 +34,91 @@ _SUPPORT_TOL = 1e-8  # v_t above this counts as used
 class Recipe:
     v: np.ndarray  # (n_cols,) fractional batches, cost-normalized
     gain: float
-    banned: frozenset[int]  # sub-problem identity: excluded columns ...
+    banned: frozenset[int]  # sub-problem identity: excluded key elements ...
     forced: tuple[int, ...]  # ... and required ones (Lawler/Murty)
+    held: tuple[int, ...] = ()  # item rows left over at the end (N v > 0), sold or kept
+    split: tuple[int, ...] | None = None  # key of the region optimum, when v was cleaned up
 
     def support(self) -> tuple[int, ...]:
         v = self.v
         return tuple(np.flatnonzero(v > max(_SUPPORT_TOL, _SUPPORT_TOL * v.max())).tolist())
+
+    def key(self) -> tuple[int, ...]:
+        """Partition elements: columns ``j`` and residue rows as ``n_cols + row``."""
+        n = len(self.v)
+        return self.support() + tuple(n + i for i in self.held)
+
+
+def residue_rows(N: sp.csc_matrix, v: np.ndarray, price: np.ndarray) -> tuple[int, ...]:
+    """Rows with a real leftover, judged by value so cheap and expensive items compare."""
+    r = np.asarray(N @ v).ravel()
+    scale = max(_SUPPORT_TOL, _SUPPORT_TOL * float(v.max())) if len(v) else _SUPPORT_TOL
+    return tuple(np.flatnonzero(r * np.maximum(price, 1.0) > scale).tolist())
+
+
+def apply_bounds(
+    h: highspy.Highs,
+    base_ub: np.ndarray,
+    price: np.ndarray,
+    banned: frozenset[int] | set[int],
+    forced: tuple[int, ...],
+) -> None:
+    """Column and residue-row bounds for one Lawler region (rows 0..m-1 are ``-N v <= 0``)."""
+    n, m = len(base_ub), len(price)
+    lb = np.zeros(n)
+    ub = base_ub.copy()
+    lo = np.full(m, -highspy.kHighsInf)
+    hi = np.zeros(m)
+    for e in banned:
+        if e < n:
+            ub[e] = 0.0
+        else:
+            lo[e - n] = 0.0  # nothing of this item may be left over
+    for e in forced:
+        if e < n:
+            lb[e] = EPS
+        else:
+            # some of it must be left over: EPS copper's worth, so the bound means the same
+            # for a 1-copper and a 1-platinum item
+            hi[e - n] = -EPS / max(float(price[e - n]), 1.0)
+    h.changeColsBounds(n, list(range(n)), lb.tolist(), ub.tolist())
+    h.changeRowsBounds(m, list(range(m)), lo.tolist(), hi.tolist())
+
+
+def lawler(solve, polish, k: int, deadline: float | None, stop_gain: float | None = None):
+    """Best-first Lawler/Murty ranking over region optima, deduplicated after ``polish``.
+
+    ``solve(banned, forced)`` returns a region's optimum (or None); ``polish(r)`` the recipe to
+    report for it. Regions are always split on the optimum's own key, even when its polished
+    form duplicates an earlier result -- skipping the split would lose the whole region.
+    """
+    first = solve(frozenset(), ())
+    if first is None or not first.support():
+        return []
+    counter = itertools.count()
+    heap: list[tuple[float, int, Recipe]] = [(-first.gain, next(counter), first)]
+    out: list[Recipe] = []
+    seen: set[tuple[int, ...]] = set()
+    pops = 0
+    while heap and len(out) < k and pops < 50 * k + 100:
+        if deadline is not None and time.monotonic() > deadline:
+            break
+        _, _, r = heapq.heappop(heap)
+        pops += 1
+        if stop_gain is not None and r.gain <= stop_gain:
+            break  # best-first: nothing left anywhere beats the floor
+        shown = polish(r)
+        if shown.key() not in seen and shown.support():
+            seen.add(shown.key())
+            out.append(shown)
+        key = r.key()
+        for i, e in enumerate(key):
+            if deadline is not None and time.monotonic() > deadline:
+                break
+            child = solve(r.banned | {e}, r.forced + key[:i])
+            if child is not None and child.support():
+                heapq.heappush(heap, (-child.gain, next(counter), child))
+    return out
 
 
 class Solver:
@@ -46,7 +131,7 @@ class Solver:
         self.solves = 0
         self._banned: set[int] = set()
         inf = highspy.kHighsInf
-        self.base_ub = np.array([1.0 if c.limited else inf for c in table.cols], dtype=float)
+        self.base_ub = np.full(self.n, inf, dtype=float)
         h = highspy.Highs()
         h.setOptionValue("output_flag", False)
         h.addVars(self.n, [0.0] * self.n, self.base_ub.tolist())
@@ -83,36 +168,62 @@ class Solver:
         self._banned.update(cols)
 
     def solve(self, banned=(), forced=()) -> Recipe | None:
-        r = self._solve_once(self._banned | set(banned), tuple(forced))
-        if r is None:
-            return None
-        # Forced columns sitting at their EPS lower bound are artifacts of the "column is
-        # used" constraint: the recipe does not really want them (docs/ALGORITHM.md 4.3's
-        # epsilon). Re-solve without them to get the region's true best ray -- otherwise the
-        # same recipe comes back with epsilon pollution and crowds out the next distinct one.
-        artifact = [j for j in r.forced if abs(r.v[j] - EPS) <= max(1e-12, 1e-6 * EPS)]
-        if not artifact:
-            return r
-        forced2 = tuple(j for j in r.forced if j not in artifact)
-        clean = self._solve_once(r.banned | set(artifact), forced2)
-        if clean is None:
-            return r
-        return clean
-
-    def _solve_once(self, banned: frozenset[int], forced: tuple[int, ...]) -> Recipe | None:
-        lb = np.zeros(self.n)
-        ub = self.base_ub.copy()
-        if banned:
-            ub[sorted(banned)] = 0.0
-        if forced:
-            lb[sorted(forced)] = EPS
-        self.h.changeColsBounds(self.n, list(range(self.n)), lb.tolist(), ub.tolist())
+        """The optimum of one Lawler region (``banned``/``forced`` are key elements)."""
+        banned = frozenset(self._banned | set(banned))
+        apply_bounds(self.h, self.base_ub, self.t.price, banned, tuple(forced))
         self.h.run()
         self.solves += 1
         if self.h.modelStatusToString(self.h.getModelStatus()).lower() != "optimal":
             return None
         v = np.maximum(np.array(self.h.getSolution().col_value, dtype=float), 0.0)
-        return Recipe(v=v, gain=float(self.rev @ v - 1.0), banned=banned, forced=forced)
+        return Recipe(
+            v=v,
+            gain=float(self.rev @ v - 1.0),
+            banned=banned,
+            forced=tuple(forced),
+            held=residue_rows(self.t.N, v, self.t.price),
+        )
+
+    def polish(self, r: Recipe) -> Recipe:
+        """Drop the EPS "is used" artifacts of a region optimum (docs/ALGORITHM.md 4.3).
+
+        Forced columns sitting at their EPS lower bound are there only because the region
+        demands them. The recipe actually meant is the best one inside the optimum's own
+        moves without them; it is what gets reported, while the region is still split on the
+        optimum itself."""
+        return polish(self, r)
+
+
+def _at_eps(N: sp.csc_matrix, price: np.ndarray, r: Recipe) -> tuple[set[int], bool]:
+    """Forced columns at their EPS bound, and whether any forced residue sits at its bound."""
+    n = len(r.v)
+    cols = {j for j in r.forced if j < n and abs(r.v[j] - EPS) <= max(1e-12, 1e-6 * EPS)}
+    res = np.asarray(N @ r.v).ravel()
+    at_row = False
+    for e in r.forced:
+        if e >= n:
+            bound = EPS / max(float(price[e - n]), 1.0)
+            at_row |= abs(res[e - n] - bound) <= max(1e-15, 1e-6 * bound)
+    return cols, at_row
+
+
+def polish(solver, r: Recipe) -> Recipe:
+    """Shared by both solvers: re-solve inside the optimum's own moves without the artifacts."""
+    artifact, row_artifact = _at_eps(solver.t.N, solver.t.price, r)
+    if not artifact and not row_artifact:
+        return r
+    outside = set(range(solver.n)) - (set(r.support()) - artifact)
+    clean = solver.solve(banned=outside)
+    if clean is None or not clean.support():
+        return r
+    return Recipe(
+        v=clean.v,
+        gain=clean.gain,
+        banned=r.banned,
+        forced=r.forced,
+        held=clean.held,
+        split=r.key(),
+    )
 
 
 def _loop_model(t: Table, banned: set[int], rev: np.ndarray) -> highspy.Highs:
@@ -148,13 +259,15 @@ def _loop_model(t: Table, banned: set[int], rev: np.ndarray) -> highspy.Highs:
     return h
 
 
-def find_free_loops(solver: Solver) -> list[Recipe]:
+def find_free_loops(solver: Solver, deadline: float | None = None) -> list[Recipe]:
     """4.1: zero-cost item-growing cycles (gain would be infinite). Bans each loop's support."""
     t = solver.t
     rev = solver.rev
     loops: list[Recipe] = []
     banned: set[int] = set()
     for _ in range(50):
+        if deadline is not None and time.monotonic() > deadline:
+            break
         h = _loop_model(t, banned, rev)
         h.run()
         solver.solves += 1
@@ -174,33 +287,10 @@ def find_free_loops(solver: Solver) -> list[Recipe]:
 
 
 def top_k(solver: Solver, k: int, deadline: float | None = None) -> list[Recipe]:
-    """4.2-4.3: the k best recipes by gain, Lawler/Murty ranked, deduplicated by support."""
+    """4.2-4.3: the k best recipes by gain, Lawler/Murty ranked, deduplicated by key."""
     if k <= 0 or solver.n == 0:
         return []
-    first = solver.solve()
-    if first is None or not first.support():
-        return []
-    counter = itertools.count()
-    heap: list[tuple[float, int, Recipe]] = [(-first.gain, next(counter), first)]
-    out: list[Recipe] = []
-    seen: set[tuple[int, ...]] = set()
-    while heap and len(out) < k:
-        if deadline is not None and time.monotonic() > deadline:
-            break
-        _, _, r = heapq.heappop(heap)
-        supp = r.support()
-        if supp in seen:
-            continue
-        seen.add(supp)
-        out.append(r)
-        for i, t in enumerate(supp):
-            if deadline is not None and time.monotonic() > deadline:
-                break
-            child = solver.solve(banned=r.banned | {t}, forced=r.forced + tuple(supp[:i]))
-            if child is None or not child.support():
-                continue
-            heapq.heappush(heap, (-child.gain, next(counter), child))
-    return out
+    return lawler(solver.solve, solver.polish, k, deadline)
 
 
 def decompose(solver: Solver, w: Recipe) -> list[Recipe]:

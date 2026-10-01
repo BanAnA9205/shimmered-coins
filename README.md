@@ -9,7 +9,9 @@ With the introduction of the Shimmering mechanic in Terraria, many material loop
 
 # Status
 
-Early MVP. The roadmap is in [`docs/PLAN.md`](docs/PLAN.md).
+Early MVP, now a crafting assistant in the making. **[`docs/STATUS.md`](docs/STATUS.md) is the
+where-are-we summary**; the roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the engine design
+in [`docs/ALGORITHM.md`](docs/ALGORITHM.md).
 
 - [x] Dataset schema, SQLite storage, curation overrides, version diff ([`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md))
 - [x] Move graph: buy / sell / craft / shimmer, with NPC happiness pricing and world conditions
@@ -27,7 +29,10 @@ pytest
 shimcoins data fetch           # picks a version, confirms, cleans up after itself
 shimcoins data info data/1.4.5.8
 
-# search it
+# plan from a world's chest items (the pivot search; --farm adds EV farming plans)
+shimcoins plan data/1.4.5.8 --world ~/.local/share/Terraria/Worlds/joe.wld --all-npcs 0.75 --top 5
+
+# search the shop economy from scratch
 shimcoins search data/1.4.5.8 --all-npcs 0.75 --flag hardmode --top 5
 
 # the bundled toy world (invented data) works everywhere a dataset does
@@ -68,7 +73,6 @@ The options below describe the world and NPC setup:
 | option | effect |
 |--------|--------|
 | `--npc Merchant=0.85@snow` | present NPC, its happiness price adjustment (0.75 happiest .. 1.5) and the biome(s) it lives in (`@any`: try every biome) |
-| `--travel-stock "Item"` | what the Travelling Merchant sells today |
 | `--all-npcs 1` | every shop NPC present at the given adjustment |
 | `--flag hardmode` | world flags (progression, world evil, events, ...) |
 | `--include`, `--exclude`, `--must-use`, `--start` | constrained search on specific items |

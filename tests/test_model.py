@@ -43,18 +43,17 @@ def test_conditions():
 def test_buy_sell_graph(toy):
     g = graph(toy)
     names = {g.name(i): t.cost for i, t in g.buy_of.items()}
-    # Kit needs downedBoss; the unsellable Junk never appears for sale.
+    # Kit needs downedBoss; the unsellable Junk never appears for sale; the Merchant's
+    # buy-once Bar is left out (one-time stock can't be repeated in a loop).
     assert names == {
         "Ore": 100,
         "Gem": 1000,
         "Oak Wood": 10,
         "Bundle": 2000,
-        "Bar": 900,
         "Bottle": 20,
     }
     assert g.sell_unit(toy.item_by_name("Ring").id) == 4000
     assert toy.item_by_name("Junk").id not in g.sell_of
-    assert g.buy_of[toy.item_by_name("Bar").id].limited
 
 
 def test_happiness_changes_buy_prices(toy):
@@ -167,13 +166,3 @@ def test_crafting_location_recipes_are_available(toy):
     g = graph(toy)
     water = toy.item_by_name("Bottled Water").id
     assert any(t.kind == CRAFT and t.output_items == {water} for t in g.transforms)
-
-
-def test_travel_stock(toy):
-    crown = toy.item_by_name("Crown").id
-    g = build_graph(
-        toy, WorldConfig(), NpcSetup(happiness={1: 1.0}, travel_stock=frozenset({crown}))
-    )
-    t = g.buy_of[crown]
-    assert t.limited and t.cost == 100000
-    assert "Travelling Merchant" in g.describe(t)

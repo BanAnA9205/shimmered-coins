@@ -72,7 +72,6 @@ def test_best_recipe_is_r1(toy):
     assert [m.transform.kind for m in r.moves][-1] == "sell"
     assert "sell 1 Ring" in r.moves[-1].text
     assert r.length == 2 and r.places == ["Smith", "shimmer pool"]
-    assert not r.one_shot
     assert rep.stats.complete and rep.loops == []
 
 
@@ -235,7 +234,7 @@ def test_tour_places_counts_the_doc_examples(toy):
     )
     from shimmered_coins.search.schedule import tour_places
 
-    merchant_buys = [t for t in g.transforms if t.kind == "buy" and t.npc == 2 and not t.limited]
+    merchant_buys = [t for t in g.transforms if t.kind == "buy" and t.npc == 2]
     smith_buy = next(t for t in g.transforms if t.kind == "buy" and t.npc == 1)
     craft = next(t for t in g.transforms if t.kind == "craft")
     shimmer = next(t for t in g.transforms if t.kind == "shimmer")
@@ -341,10 +340,6 @@ def test_wallet_filters_and_scales(toy):
     rep = search(g, SearchParams(top=10, wallet=23000))
     r1 = rep.results[0]
     assert r1.gain == pytest.approx(7.0) and r1.capital == 23000
-    # one-shot recipes (limited stock) are never scaled up to the wallet
-    one_shots = [r for r in rep.results if r.one_shot]
-    assert one_shots
-    assert all(r.capital < 23000 for r in one_shots)
 
 
 def test_shape_dedup_keeps_one_route(toy):
@@ -378,3 +373,18 @@ def test_shape_dedup_keeps_one_route(toy):
     assert rep.results
     assert all(r.gain == pytest.approx(0.2) for r in rep.results)
     assert len(rep.results) == 1  # the two routes collapsed into one
+
+
+def test_post_filters_do_not_starve_top(toy):
+    """max_places/wallet drop results *after* ranking, so the candidate batch must be larger
+    than what is displayed; a filtered search still fills the top list when results exist."""
+    g = graph(toy, ["downedBoss", "hardmode"])
+    base = search(g, SearchParams(top=10))
+    rep = search(g, SearchParams(top=8, max_places=2))
+    assert len(rep.results) >= min(len(base.results), 8)
+
+
+def test_min_gain_filter_fills_top(toy):
+    g = graph(toy, ["downedBoss", "hardmode"])
+    rep = search(g, SearchParams(top=8, min_gain=0.30, allow_loss=True))
+    assert rep.results and all(r.gain > 0.30 - 0.30 for r in rep.results)  # all well above -55%

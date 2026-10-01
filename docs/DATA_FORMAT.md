@@ -30,7 +30,7 @@ For a complete small example, see `python/shimmered_coins/demo/toy_world.json`. 
 
   // price: custom shop price in copper (omit to use the item value).
   // currency: "coins" or anything else (ignored by the engine).
-  // limited: finite stock (Travelling Merchant, buy-once). Loops using it are not repeatable.
+  // limited: buy-once stock. Kept in the data; the search leaves these entries out.
   "shops": [
     {"npc": 17, "item": 8, "price": null, "currency": "coins",
      "conditions": ["!hardmode"], "limited": false}

@@ -16,15 +16,13 @@ if TYPE_CHECKING:
     from ..model.graph import Graph, Transform
 
 POOL = "shimmer pool"
-TRAVEL = "Travelling Merchant"
+_MAX_ROUNDS = 1000  # cycles run in rounds of the seed's size; more rounds = unplayable
 
 
 def tour_places(g: Graph, supp: list[Transform], seller_id: int | None) -> list[str]:
     """The distinct places the loop visits, in tour order (ALGORITHM.md 5)."""
     npc_ids = sorted({t.npc for t in supp if t.kind == "buy" and t.npc is not None})
     places = [g.dataset.npcs[n].name for n in npc_ids if n in g.dataset.npcs]
-    if any(t.kind == "buy" and t.npc is None for t in supp):
-        places.append(TRAVEL)
     if any(t.kind == "shimmer" for t in supp):
         places.append(POOL)
     if seller_id is not None:
@@ -56,7 +54,9 @@ def order_pool_moves(
     seeds: list[tuple[Transform, int]] = []
     seeded: set[int] = set()
 
-    while pending:
+    for _ in range(_MAX_ROUNDS):
+        if not pending:
+            break
         progressed = False
         for t in sorted(pending, key=lambda x: x.id):
             can = pending[t]
@@ -92,6 +92,8 @@ def order_pool_moves(
         inv[item] = inv.get(item, 0) + need
         seeds.append((buy, need))
         seeded.add(item)
+    if pending:
+        return None  # a seeded cycle that would need too many rounds to be a practical loop
     return out, seeds
 
 

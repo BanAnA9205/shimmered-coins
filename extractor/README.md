@@ -91,7 +91,7 @@ bestiary completion.
 
 ## Known gaps
 
-- The Travelling Merchant's random stock isn't extracted. Enter today's stock with `--travel-stock` or in the UI.
+- The Travelling Merchant's random stock isn't extracted, and the search doesn't support him in this version.
 - Pre-1.4.4 shops use an approximate shop-index → NPC table, and prices set inside `SetupShop` aren't captured.
 - Probing finds conditions that depend on one or two pieces of state. `if/else` biome chains
   (e.g. "desert but not snow") come out as just `zone:desert`. That only matters if you put an NPC

@@ -54,13 +54,12 @@ class Result:
     length: int
     score: float
     per_trip: float  # exp(score): "x m per trip"
-    one_shot: bool
 
     def summary(self, g: Graph) -> str:
         lines = [
             f"gain {self.gain:+.2%}  ×{self.per_trip:.2f} per trip  (L={self.length}: "
             f"{', '.join(self.places)}; capital {format_coins(self.capital)}, "
-            f"profit {format_coins(self.profit)}" + (", one-shot" if self.one_shot else "") + ")"
+            f"profit {format_coins(self.profit)})"
         ]
         lines += [f"  {k + 1}. {m.text}" for k, m in enumerate(self.moves)]
         if self.leftover:
@@ -131,8 +130,7 @@ def _finalize(
                 drift = r.gain - plan.gain
                 if drift > max(0.02, 0.05 * abs(r.gain)):
                     continue
-                one_shot = any(t.limited for t, _ in plan_moves)
-                if params.wallet is not None and not one_shot:
+                if params.wallet is not None:
                     # present repeatable plans at the size of your wallet
                     f = params.wallet // plan.capital
                     if f > 1:
@@ -168,7 +166,6 @@ def _result_from(g, supp, plan_moves, plan, r, params, seller) -> Result:
         length=length,
         score=sc,
         per_trip=math.exp(sc) if math.isfinite(sc) else 0.0,
-        one_shot=any(t.limited for t, _ in plan_moves),
     )
 
 
@@ -184,8 +181,13 @@ def search(g: Graph, params: SearchParams = SearchParams()) -> SearchReport:
     deadline = start + params.time_limit if params.time_limit is not None else None
     table = build_table(g, params.start_items)
     solver = Solver(table, must_use=params.must_use)
-    loops = find_free_loops(solver)
-    recipes = top_k(solver, params.top, deadline)
+    loops = find_free_loops(solver, deadline)
+    # Post-filters (max_places, wallet, min_gain) drop recipes, so candidate batches must be
+    # bigger than what is displayed -- otherwise a filter can leave fewer results than exist.
+    k = params.top
+    if params.max_places is not None or params.wallet is not None or params.min_gain > 0:
+        k = min(5 * params.top, 200)
+    recipes = top_k(solver, k, deadline)
     if params.must_use:
         # Must-use rows can force a sum of atomic recipes; split it into its parts (4.3.4).
         # The parts are solved without the must rows: the sum already satisfies them.
@@ -233,7 +235,8 @@ def search(g: Graph, params: SearchParams = SearchParams()) -> SearchReport:
         seen.add(sig)
         distinct.append(r)
     stats.elapsed = time.monotonic() - start
-    stats.complete = deadline is None or stats.elapsed <= deadline + 5.0
+    # ``deadline`` is a clock reading, not a duration: compare clock with clock
+    stats.complete = deadline is None or time.monotonic() <= deadline
     return SearchReport(
         results=distinct[: params.top],
         loops=[_loop_moves(g, table, r) for r in loops],

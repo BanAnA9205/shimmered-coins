@@ -829,6 +829,20 @@ static partial class Program
         // name; the Python side maps the known ones (NotExpert -> "!expert", etc.)
 
         int npcCount = Convert.ToInt32(GetStatic("Terraria.ID.NPCID", "Count"));
+        // every dropper's display name, so the plan UI can say "farm Brain of Cthulhu"
+        j.Key("drop_npcs").Arr();
+        for (int npc = -80; npc < npcCount; npc++)
+        {
+             IEnumerable probe = null;
+            try { probe = getRules.Invoke(db, new object[] { npc, false }) as IEnumerable; }
+            catch { }
+            bool any = false;
+            if (probe != null)
+                foreach (var r in probe) { any = true; break; }
+            if (any) j.Obj().Key("id").Val(npc).Key("name").Val(NpcName(npc)).End();
+        }
+        j.End();
+
         j.Key("npc_drops").Arr();
         int rulesTotal = 0, npcsWithDrops = 0;
         for (int npc = -80; npc < npcCount; npc++)

@@ -11,6 +11,8 @@ import itertools
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from ..data.schema import Dataset, Recipe
 from .world import ANY_ZONE, NpcSetup, WorldConfig, buy_price, conditions_hold, sell_price
 
@@ -29,7 +31,6 @@ class Transform:
     cost: int = 0  # copper spent per batch
     revenue: int = 0  # copper earned per batch
     npc: int | None = None
-    limited: bool = False  # limited shop stock; a loop using it is not repeatable
     ref: str = ""  # provenance, e.g. "recipe:123" or "shimmer:decraft"
 
     @property
@@ -69,12 +70,16 @@ class Graph:
         def fmt(pairs: tuple[tuple[int, int], ...]) -> str:
             return " + ".join(f"{_num(c * batches)} {self.name(i)}" for i, c in pairs)
 
+        if t.kind == "stock":
+            return f"take {fmt(t.outputs)} from storage"
+        if t.kind == "farm":
+            npc = self.dataset.npcs.get(t.npc) if t.npc is not None else None
+            who = npc.name if npc else f"NPC {t.npc}"
+            return f"farm ~{batches} {who} for ≈{fmt(t.outputs)}"
         if t.kind == BUY:
             npc = self.dataset.npcs.get(t.npc) if t.npc is not None else None
             who = f" from {npc.name}" if npc else ""
-            if t.ref == "travel":
-                who = " from the Travelling Merchant"
-            elif "@" in t.ref:
+            if "@" in t.ref:
                 who += f" (living in {t.ref.split('@', 1)[1].replace('+', ' & ')})"
             return f"buy {fmt(t.outputs)}{who} for {format_coins(t.cost * batches)}"
         if t.kind == SELL:
@@ -130,7 +135,10 @@ def build_graph(
     world: WorldConfig,
     npcs: NpcSetup,
     constraints: Constraints = Constraints(),
+    known_items: frozenset[int] = frozenset(),
 ) -> Graph:
+    """``known_items`` are items obtainable outside shops (world chests, farming), so
+    crafts consuming them must survive pruning for the plan search (search/plan.py)."""
     items = ds.items
     coins = {i for i, it in items.items() if it.is_coin}
     raw: list[Transform] = []
@@ -151,6 +159,8 @@ def build_graph(
         for s in ds.shops:
             if s.currency != "coins" or not npcs.present(s.npc):
                 continue
+            if s.limited:
+                continue  # buy-once stock can't be repeated in a loop: not modelled yet
             if not conditions_hold(s.conditions, world, s.npc, npcs):
                 continue
             outs = ((s.item, 1),)
@@ -167,23 +177,10 @@ def build_graph(
                 zones = [c[5:] for c in s.conditions if c.lower().startswith("zone:")]
                 if zones:
                     ref += "@" + "+".join(zones)
-            t = Transform(0, BUY, (), outs, cost=price, npc=s.npc, limited=s.limited, ref=ref)
+            t = Transform(0, BUY, (), outs, cost=price, npc=s.npc, ref=ref)
             cur = offers.get((s.npc, s.item))
-            if cur is None or (price, t.limited) < (cur.cost, cur.limited):
-                offers[(s.npc, s.item)] = t
-        for item in npcs.travel_stock:
-            outs = ((item, 1),)
-            it = items.get(item)
-            if it is None or it.value <= 0 or not allowed(outs):
-                continue
-            price = buy_price(it.value, 1.0, npcs.discount)
-            if price <= 0:
-                continue
-            cur = offers.get((None, item))
             if cur is None or price < cur.cost:
-                offers[(None, item)] = Transform(
-                    0, BUY, (), outs, cost=price, limited=True, ref="travel"
-                )
+                offers[(s.npc, s.item)] = t
         raw.extend(offers.values())
 
     # Sell: any shop NPC buys anything at value/5 adjusted by the happiest NPC.
@@ -220,15 +217,16 @@ def build_graph(
             if outs and allowed(ins, outs):
                 raw.append(Transform(0, SHIMMER, ins, outs, ref=f"shimmer:{s.kind}"))
 
-    return _finalize(ds, _prune(raw), npcs)
+    return _finalize(ds, _prune(raw, known_items), npcs)
 
 
-def _prune(ts: list[Transform]) -> list[Transform]:
+def _prune(ts: list[Transform], known_items: frozenset[int] = frozenset()) -> list[Transform]:
     """Drop transforms that can never be part of a useful sequence.
 
-    Forward: inputs must be obtainable starting from buys. Backward: at least one output must be
-    convertible back into coins. Both passes are the sparse reachability in ``search/table.py``
-    (docs/ALGORITHM.md 4.0); this is a thin wrapper.
+    Forward: inputs must be obtainable starting from buys or ``known_items`` (world-chest and
+    farm items in plan mode). Backward: at least one output must be convertible back into
+    coins. Both passes are the sparse reachability in ``search/table.py`` (docs/ALGORITHM.md
+    4.0); this is a thin wrapper.
     """
     from ..search.table import column_matrix, prune_columns
 
@@ -237,7 +235,11 @@ def _prune(ts: list[Transform]) -> list[Transform]:
         for i, _ in t.inputs + t.outputs:
             item_index.setdefault(i, len(item_index))
     N, is_sell, liquid = column_matrix(ts, item_index)
-    keep = prune_columns(N, liquid, is_sell)
+    base_reach = np.zeros(len(item_index), dtype=bool)
+    for item in known_items:
+        if item in item_index:
+            base_reach[item_index[item]] = True  # held/farmed items are obtainable
+    keep = prune_columns(N, base_reach, liquid, is_sell)
     return [t for t, k in zip(ts, keep) if k]
 
 
@@ -251,7 +253,7 @@ def _finalize(ds: Dataset, ts: list[Transform], npcs: NpcSetup | None = None) ->
         if t.kind == BUY:
             item = t.outputs[0][0]
             cur = g.buy_of.get(item)  # helpers keep the cheapest offer per item
-            if cur is None or (t.cost, t.limited) < (cur.cost, cur.limited):
+            if cur is None or t.cost < cur.cost:
                 g.buy_of[item] = t
         elif t.kind == SELL:
             g.sell_of[t.inputs[0][0]] = t
@@ -263,4 +265,4 @@ def _finalize(ds: Dataset, ts: list[Transform], npcs: NpcSetup | None = None) ->
 
 
 def _fields(t: Transform) -> tuple:
-    return (t.kind, t.inputs, t.outputs, t.cost, t.revenue, t.npc, t.limited, t.ref)
+    return (t.kind, t.inputs, t.outputs, t.cost, t.revenue, t.npc, t.ref)

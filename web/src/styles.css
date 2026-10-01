@@ -719,3 +719,48 @@ input[type="range"] {
   padding: 1px 4px;
   border-radius: 3px;
 }
+
+/* ---- plan tab ------------------------------------------------------------------------------ */
+.plan-panel {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.plan-world-info {
+  margin: 10px 0;
+}
+
+.plan-stock-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.plan-stock-cell {
+  cursor: pointer;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.plan-stock-cell.off {
+  opacity: 0.4;
+}
+
+.slot-mini {
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.82rem;
+}
+
+.badge-stock {
+  background: #294;
+}
+
+.badge-farm {
+  background: #765;
+}
