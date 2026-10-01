@@ -342,32 +342,33 @@ def create_app() -> FastAPI:
                 time_limit=req.time_limit,
             ),
         )
+
+        def result_json(r) -> dict:
+            return {
+                "profit": r.profit,
+                "profit_text": format_coins(r.profit),
+                "capital": r.capital,
+                "capital_text": format_coins(r.capital),
+                "kills": r.kills,
+                "approx": r.approx,
+                "places": r.places,
+                "moves": [_move_json(g, m, n, g.describe(m, n)) for m, n in r.moves],
+                "residue": [
+                    {"id": i, "name": g.name(i), "count": c} for i, c in sorted(r.residue.items())
+                ],
+            }
+
         return {
             "version": ds.version,
             "liquidation": rep.liquidation,
+            "combined": result_json(rep.combined) if rep.combined else None,
             "stats": {
                 "solves": rep.solves,
                 "loops": len(rep.loops),
                 "elapsed": rep.elapsed,
                 "complete": rep.complete,
             },
-            "results": [
-                {
-                    "profit": r.profit,
-                    "profit_text": format_coins(r.profit),
-                    "capital": r.capital,
-                    "capital_text": format_coins(r.capital),
-                    "kills": r.kills,
-                    "approx": r.approx,
-                    "places": r.places,
-                    "moves": [_move_json(g, m, n, g.describe(m, n)) for m, n in r.moves],
-                    "residue": [
-                        {"id": i, "name": g.name(i), "count": c}
-                        for i, c in sorted(r.residue.items())
-                    ],
-                }
-                for r in rep.results
-            ],
+            "results": [result_json(r) for r in rep.results],
         }
 
     @app.post("/api/worlds/detail")

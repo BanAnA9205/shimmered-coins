@@ -67,6 +67,7 @@ def test_plan_endpoint_runs(client):
     d = res.json()
     assert d["stats"]["solves"] > 0
     assert d["results"] and d["results"][0]["profit"] >= 0
+    assert "combined" in d
 
     r_bad = client.post("/api/plan", json={"dataset": "demo"})
     assert r_bad.status_code == 400

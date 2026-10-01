@@ -217,24 +217,8 @@ def cmd_plan(a: argparse.Namespace) -> int:
                         "elapsed": rep.elapsed,
                         "complete": rep.complete,
                     },
-                    "results": [
-                        {
-                            "profit": r.profit,
-                            "capital": r.capital,
-                            "kills": r.kills,
-                            "approx": r.approx,
-                            "places": r.places,
-                            "moves": [
-                                {"kind": m.kind, "batches": n, "text": g.describe(m, n)}
-                                for m, n in r.moves
-                            ],
-                            "residue": [
-                                {"id": i, "name": g.name(i), "count": c}
-                                for i, c in sorted(r.residue.items())
-                            ],
-                        }
-                        for r in rep.results
-                    ],
+                    "combined": _plan_json(g, rep.combined) if rep.combined else None,
+                    "results": [_plan_json(g, r) for r in rep.results],
                 },
                 indent=2,
             )
@@ -246,9 +230,25 @@ def cmd_plan(a: argparse.Namespace) -> int:
     )
     if not rep.results:
         print("no plan improves on the liquidation floor (try --farm for farming recipes)")
+    if rep.combined:
+        print(
+            f"\nALL of these together (sharing stock, wallet and kills): {rep.combined.summary(g)}"
+        )
     for k, r in enumerate(rep.results, 1):
         print(f"\n#{k} {r.summary(g)}")
     return 0
+
+
+def _plan_json(g, r) -> dict:
+    return {
+        "profit": r.profit,
+        "capital": r.capital,
+        "kills": r.kills,
+        "approx": r.approx,
+        "places": r.places,
+        "moves": [{"kind": m.kind, "batches": n, "text": g.describe(m, n)} for m, n in r.moves],
+        "residue": [{"id": i, "name": g.name(i), "count": c} for i, c in sorted(r.residue.items())],
+    }
 
 
 def _farm_seed(ds, kills: int | None):

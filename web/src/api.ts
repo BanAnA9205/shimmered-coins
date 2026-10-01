@@ -224,6 +224,8 @@ export interface PlanResponse {
   liquidation: number;
   stats: PlanStats;
   results: PlanResult[];
+  /** every result at once, sharing stock, wallet and kills; null when it adds nothing */
+  combined: PlanResult | null;
 }
 
 export interface PlanRequest {

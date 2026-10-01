@@ -226,3 +226,59 @@ def test_plan_reports_a_time_out():
     g = _g(ds, stock={2: 10, 3: 20})
     rep = plan(g, {2: 10, 3: 20}, PlanParams(top=3, time_limit=0.0))
     assert not rep.complete
+
+
+# ---- combined plan ----------------------------------------------------------------------------
+
+
+def _toy_stock_graph(stock):
+    from conftest import TOY
+    from shimmered_coins.data import load_dataset
+
+    ds = load_dataset(TOY)
+    return build_graph(
+        ds,
+        WorldConfig(flags=frozenset({"downedboss"})),
+        NpcSetup(happiness={1: 1.0, 2: 1.0}),
+        Constraints(kinds=frozenset({"buy", "craft", "shimmer", "sell"})),
+        known_items=frozenset(stock),
+    )
+
+
+def test_most_profitable_single_plans_are_kept():
+    """Candidates come out of the ranking by gain; the page keeps the most *profitable* ones.
+
+    Spending the 1g wallet on Rings (70,000c) used to be cut off behind stock-only plans."""
+    stock = {1: 6, 2: 1, 3: 2}  # Ore, Bar, Gem
+    g = _toy_stock_graph(stock)
+    rep = plan(g, stock, PlanParams(top=5, wallet=10_000))
+    profits = [r.profit for r in rep.results]
+    assert profits == sorted(profits, reverse=True)
+    assert profits[0] == 70_000 and rep.results[0].capital == 10_000
+
+
+def test_combined_plan_shares_stock_and_wallet():
+    """The stock Ring and the wallet Rings run together: more than either alone, and still
+    within what you hold and can spend."""
+    stock = {1: 6, 2: 1, 3: 2}
+    g = _toy_stock_graph(stock)
+    rep = plan(g, stock, PlanParams(top=5, wallet=10_000))
+    c = rep.combined
+    assert c is not None
+    assert c.profit > rep.results[0].profit
+    assert c.capital <= 10_000
+    taken: dict[int, int] = {}
+    for t, n in c.moves:
+        if t.kind == "stock":
+            item = int(t.ref.split(":")[1])
+            taken[item] = taken.get(item, 0) + n
+    assert taken and all(taken[i] <= stock[i] for i in taken)
+    assert any(t.kind == "buy" for t, _ in c.moves)
+
+
+def test_no_combined_plan_when_it_adds_nothing():
+    """A single plan can't be improved by combining it with itself."""
+    ds = plan_dataset()
+    g = _g(ds, stock={2: 10, 3: 20})
+    rep = plan(g, {2: 10, 3: 20}, PlanParams(top=3))
+    assert len(rep.results) == 1 and rep.combined is None

@@ -104,6 +104,9 @@ class PlanReport:
     solves: int = 0
     complete: bool = True
     elapsed: float = 0.0
+    # every result at once, sharing the same stock, wallet and kill budget (when that beats
+    # the best single result): "do all of this"
+    combined: PlanResult | None = None
 
 
 # --------------------------------------------------------------------------- sources --------
@@ -523,6 +526,104 @@ def _finalize_plan(
     return None
 
 
+# --------------------------------------------------------------------------- combine --------
+
+
+def combine(
+    g: Graph,
+    table: Table,
+    supports: list[tuple[int, ...]],
+    stock: dict[int, int],
+    params: PlanParams,
+    seller: int | None,
+    time_limit: float = 5.0,
+) -> PlanResult | None:
+    """One plan that runs the found plans side by side, sharing stock, wallet and kills.
+
+    The ranking LP is normalized, so each result is a single recipe scaled up on its own:
+    two results drawing on the same Bars both assume they get all of them. Here the moves of
+    every result go into one integer program with the real limits (held counts, the wallet,
+    the kill budget) and whole batches, so the answer is directly playable. It stays small:
+    only the moves the results already use, not the whole table.
+    """
+    cols = sorted({j for supp in supports for j in supp})
+    if not cols:
+        return None
+    sub = table.N[:, cols].tocsr()
+    rows = np.flatnonzero(np.diff(sub.indptr))  # items these moves touch
+    sub = sub[rows]
+    n = len(cols)
+    inf = highspy.kHighsInf
+    ts = [table.cols[j] for j in cols]
+    ub = []
+    for t in ts:
+        if t.kind == STOCK:
+            ub.append(float(stock.get(int(t.ref.split(":", 1)[1]), 0)))
+        elif t.kind == FARM:
+            ub.append(float(max(params.kills, 0)))
+        else:
+            ub.append(inf)
+    profit = (table.revenue() - table.cost)[cols]
+
+    h = highspy.Highs()
+    h.setOptionValue("output_flag", False)
+    h.setOptionValue("time_limit", float(max(time_limit, 0.1)))
+    h.addVars(n, [0.0] * n, ub)
+    h.changeColsCost(n, list(range(n)), (-profit + _BATCH_CHARGE).tolist())
+    h.changeColsIntegrality(n, list(range(n)), [highspy.HighsVarType.kInteger] * n)
+    inv = (-sub).tocsr()  # N v >= 0
+    h.addRows(
+        inv.shape[0],
+        [-inf] * inv.shape[0],
+        [0.0] * inv.shape[0],
+        inv.nnz,
+        inv.indptr.tolist(),
+        inv.indices.tolist(),
+        inv.data.tolist(),
+    )
+    paid = [k for k in range(n) if table.cost[cols[k]] > 0]
+    if paid:
+        h.addRows(
+            1,
+            [-inf],
+            [float(max(params.wallet, 0))],
+            len(paid),
+            [0],
+            paid,
+            [float(table.cost[cols[k]]) for k in paid],
+        )
+    farmed = [k for k in range(n) if ts[k].kind == FARM]
+    if farmed:
+        h.addRows(
+            1, [-inf], [float(max(params.kills, 0))], len(farmed), [0], farmed, [1.0] * len(farmed)
+        )
+    h.run()
+    if h.getInfo().primal_solution_status != 2:  # no feasible point found
+        return None
+    x = h.getSolution().col_value
+    moves_in = [(t, int(round(v))) for t, v in zip(ts, x) if round(v) >= 1]
+    if not moves_in:
+        return None
+    moves = _order_plan(g, moves_in)
+    if moves is None:
+        return None
+    price = {item: table.price[k] for item, k in table.item_index.items()}
+    plan_ = simulate([t for t, _ in moves], [c for _, c in moves], price)
+    if plan_ is None or plan_.capital > max(params.wallet, 0):
+        return None  # seeding a cycle would need more than the wallet
+    used = [t for t, _ in moves_in]
+    return PlanResult(
+        moves=moves,
+        profit=int(round(plan_.profit + plan_.leftover_value)),
+        capital=int(round(plan_.capital)),
+        kills=sum(c for t, c in moves if t.kind == FARM),
+        approx=any(t.kind == FARM for t in used),
+        support=tuple(cols[k] for k in range(n) if round(x[k]) >= 1),
+        places=tour_places(g, used, seller),
+        residue={i: c for i, c in plan_.leftover.items() if c > 0.5 or c < -0.5},
+    )
+
+
 # --------------------------------------------------------------------------- entry ----------
 
 
@@ -572,14 +673,23 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
         if res.profit < params.min_profit:
             continue
         results.append(res)
-        if len(results) >= params.top:
-            break
 
     # the partition enumerates candidates by gain; the page shows the most profitable
     results.sort(key=lambda r: r.profit, reverse=True)
+    results = results[: params.top]
+    combined = None
+    if len(results) > 1:
+        left = deadline - time.monotonic() if deadline is not None else 5.0
+        if left > 0:
+            combined = combine(
+                g, table, [r.support for r in results], stock, params, seller, min(left, 5.0)
+            )
+        if combined is not None and combined.profit <= results[0].profit:
+            combined = None  # nothing to gain over doing the best plan alone
     elapsed = time.monotonic() - start
     return PlanReport(
-        results=results[: params.top],
+        results=results,
+        combined=combined,
         liquidation=liquidation,
         stock=stock,
         loops=loops,
