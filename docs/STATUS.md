@@ -17,7 +17,10 @@ This file is the "where are we" summary; [`PLAN.md`](PLAN.md) is the original MV
 - **`shimcoins world <file.wld>`** — parses real saves: 480 + 296 filled chests and town NPC
   homes across the two local worlds (`Feral_Dreamland_of_Pizza.wld`, `joe.wld`).
 - **`shimcoins plan <dataset> --world <file.wld>`** — the pivot search: best plans out of
-  your chest items, optional buying (`--wallet`) and farming EVs (`--farm`).
+  your chest items, optional buying (`--wallet`) and farming EVs (`--farm`). Above the list,
+  an **"all of these together"** plan runs the found plans side by side with whole batches,
+  sharing your stock, wallet and kill budget (a small integer program in HiGHS). It's shown
+  only when it beats the best single plan.
 - **NPC drop tables** — 444 NPCs / 2,368 EV entries on 1.4.5.8, extracted through the game's own
   `ReportDroprates` API. In the dataset (`npc_drops`) for the farming-EV engine.
 - **`shimcoins serve`** — web UI with Search + Sprites tabs, the Sprites tab imports item art
@@ -78,6 +81,6 @@ The crafting-assistant search is live: `shimcoins plan <dataset> --world your.wl
 ## Conventions
 
 - Branches: `feat/<thing>`; PRs into `main`; PRs get squashed after review.
-- Tests: `pytest` (98 passing after the second audit, incl. mono-backed extractor tests);
+- Tests: `pytest` (100 passing after the combined plan, incl. mono-backed extractor tests);
   lint `ruff check` + `ruff format --check`. The C# extractor builds with the mono env.
 - Data never commits: game data, sprites and world saves stay local (`data/`, `web/public/`).

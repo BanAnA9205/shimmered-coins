@@ -245,8 +245,15 @@ export function PlanTab(props: Props) {
               wallet, or sell. (The floor assumes sale at the happiest NPC's price.)
             </div>
           )}
+          {resp.combined && (
+            <PlanResultCard
+              result={resp.combined}
+              rank="All"
+              note="the plans below together, sharing your stock, wallet and kills"
+            />
+          )}
           {resp.results.map((r, i) => (
-            <PlanResultCard key={i} result={r} rank={i + 1} />
+            <PlanResultCard key={i} result={r} rank={`#${i + 1}`} />
           ))}
         </section>
       )}
@@ -263,11 +270,19 @@ const KIND_LABEL: Record<string, string> = {
   farm: "Farm",
 };
 
-function PlanResultCard({ result, rank }: { result: PlanResult; rank: number }) {
+function PlanResultCard({
+  result,
+  rank,
+  note,
+}: {
+  result: PlanResult;
+  rank: string;
+  note?: string;
+}) {
   return (
-    <article className="panel result">
+    <article className={`panel result${note ? " result-combined" : ""}`}>
       <header className="result-head">
-        <span className="rank">#{rank}</span>
+        <span className="rank">{rank}</span>
         <span className="gain pos">+ {result.profit_text}</span>
         <span className="result-meta">
           spend {result.capital_text}
@@ -278,6 +293,7 @@ function PlanResultCard({ result, rank }: { result: PlanResult; rank: number }) 
             approx
           </span>
         )}
+        {note && <span className="result-meta">{note}</span>}
       </header>
       <div className="steps">
         {result.moves.map((m, i) => (
@@ -290,7 +306,6 @@ function PlanResultCard({ result, rank }: { result: PlanResult; rank: number }) 
               {m.npc && <span className="step-npc">{m.npc}</span>}
             </div>
             <div className="step-body">
-              {m.kind === "buy" && <span>{result.capital_text}</span>}
               {(m.inputs ?? []).map((s, j) => (
                 <span key={`i${j}`} className="slot-mini">{s.count}× {s.name}</span>
               ))}

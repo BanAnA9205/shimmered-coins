@@ -764,3 +764,9 @@ input[type="range"] {
 .badge-farm {
   background: #765;
 }
+
+/* plan tab: the "all of these together" card */
+.result-combined {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px var(--gold) inset;
+}
