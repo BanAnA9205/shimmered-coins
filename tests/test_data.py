@@ -90,3 +90,9 @@ def test_cli_npc_zones(capsys):
     info = json.loads(capsys.readouterr().out)
     assert info["zones"] == ["snow"]
     assert [f["name"] for f in info["flags"]["progression"]] == ["downedboss", "hardmode"]
+
+
+def test_cli_plan_json_is_clean(capsys):
+    assert main(["plan", str(TOY), "--all-npcs", "1", "--wallet", "1g", "--json"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["results"] and out["stats"]["complete"]

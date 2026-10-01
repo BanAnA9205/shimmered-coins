@@ -238,7 +238,8 @@ def search(g: Graph, params: SearchParams = SearchParams()) -> SearchReport:
         seen.add(sig)
         distinct.append(r)
     stats.elapsed = time.monotonic() - start
-    stats.complete = deadline is None or stats.elapsed <= deadline + 5.0
+    # ``deadline`` is a clock reading, not a duration: compare clock with clock
+    stats.complete = deadline is None or time.monotonic() <= deadline
     return SearchReport(
         results=distinct[: params.top],
         loops=[_loop_moves(g, table, r) for r in loops],

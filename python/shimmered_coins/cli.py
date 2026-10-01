@@ -180,7 +180,8 @@ def cmd_plan(a: argparse.Namespace) -> int:
         stock = stock_from_world(w, frozenset(_items(ds, a.exclude)))
         print(
             f"world {w.name!r}: {len(stock)} distinct items in {len(w.chests)} chests "
-            f"(use --exclude NAME to skip ones you do not want to spend)"
+            f"(use --exclude NAME to skip ones you do not want to spend)",
+            file=sys.stderr,  # stdout stays clean for --json
         )
     else:
         print("no --world: planning from purchases only", file=sys.stderr)
@@ -211,7 +212,12 @@ def cmd_plan(a: argparse.Namespace) -> int:
                 {
                     "world": w.name if a.world else None,
                     "liquidation": rep.liquidation,
-                    "stats": vars(rep.stats),
+                    "stats": {
+                        "solves": rep.solves,
+                        "loops": len(rep.loops),
+                        "elapsed": rep.elapsed,
+                        "complete": rep.complete,
+                    },
                     "results": [
                         {
                             "profit": r.profit,

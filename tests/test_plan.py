@@ -165,3 +165,64 @@ def test_plan_on_real_worlds(path):
         # every move is real: the batch counts are positive
         for _m, n in r.moves:
             assert n >= 1
+
+
+# ---- audit regressions ------------------------------------------------------------------------
+
+
+def _texts(g, r):
+    return [g.describe(m, n) for m, n in r.moves]
+
+
+def test_plan_never_takes_more_than_you_hold():
+    """1 Bar + 1 Gem cannot make a Ring (it needs 2 Gems), and there is no money to buy one."""
+    ds = plan_dataset()
+    g = _g(ds, stock={2: 1, 3: 1})
+    rep = plan(g, {2: 1, 3: 1}, PlanParams(top=3, wallet=0))
+    assert rep.results == []
+
+
+def test_plan_scales_to_what_you_hold():
+    """10 Bars + 20 Gems make 10 Rings, not the smallest whole batch of 1."""
+    ds = plan_dataset()
+    g = _g(ds, stock={2: 10, 3: 20})
+    rep = plan(g, {2: 10, 3: 20}, PlanParams(top=1))
+    r = rep.results[0]
+    assert "craft 10 Bar + 20 Gem -> 10 Ring" in _texts(g, r)
+    assert r.profit == 10 * 1200
+
+
+def test_plan_scales_buys_to_the_wallet():
+    """With 5s the Ring chain (4 Ore -> 12s) is found and beats Ore -> Gem (5 Ore -> 10s).
+
+    Its moves contain the Gem chain's moves, so ranking on moves alone loses it."""
+    ds = plan_dataset()
+    g = _g(ds, stock={})
+    rep = plan(g, {}, PlanParams(top=3, wallet=500))
+    assert len(rep.results) == 2
+    best, second = rep.results
+    assert any("Ring" in t for t in _texts(g, best)) and best.profit == 800
+    assert best.capital <= 500 and second.capital <= 500
+    assert second.profit == 500  # 5 Ore -> 5 Gem
+
+
+def test_plan_on_toy_world_terminates():
+    """The toy world's balanced 2 Wood -> 3 Stick -> 2 Wood cycle used to pad plans and then
+    schedule billions of one-unit rounds (the CLI hung)."""
+    from conftest import TOY
+    from shimmered_coins.data import load_dataset
+
+    ds = load_dataset(TOY)
+    g = _g(ds, stock={})
+    rep = plan(g, {}, PlanParams(top=5, wallet=10_000, time_limit=None))
+    assert rep.results
+    for r in rep.results:
+        assert r.profit > 0 and r.capital <= 10_000
+        assert not any("Stick" in t for t in _texts(g, r))
+
+
+def test_plan_reports_a_time_out():
+    ds = plan_dataset()
+    g = _g(ds, stock={2: 10, 3: 20})
+    rep = plan(g, {2: 10, 3: 20}, PlanParams(top=3, time_limit=0.0))
+    assert not rep.complete

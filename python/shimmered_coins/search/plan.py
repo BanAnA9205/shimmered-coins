@@ -25,8 +25,6 @@ the combined "sell everything" figure is reported once as the ``liquidation`` fl
 
 from __future__ import annotations
 
-import heapq
-import itertools
 import time
 from dataclasses import dataclass, field
 from math import ceil
@@ -38,12 +36,21 @@ import scipy.sparse as sp
 from ..model.graph import BUY, CRAFT, SHIMMER, Graph, Transform, format_coins
 from .engine import integer_batches
 from .quantize import simulate
-from .recipes import EPS, Recipe, find_free_loops
+from .recipes import (
+    EPS,
+    Recipe,
+    apply_bounds,
+    find_free_loops,
+    lawler,
+    polish,
+    residue_rows,
+)
 from .schedule import order_pool_moves, tour_places
 from .table import Table
 
 FARM, STOCK = "farm", "stock"
 _DEFAULT_MAX_DEN = 360360
+_BATCH_CHARGE = 1e-6  # copper per batch in the LP objective only (see PlanSolver)
 
 
 @dataclass
@@ -293,7 +300,9 @@ class PlanSolver:
         # profit per tied value; the user-facing metric remains raw profit (finalized).
         self.used = np.asarray(table.plan_used, dtype=float)
         h.addVars(self.n, [0.0] * self.n, self.base_ub.tolist())
-        h.changeColsCost(self.n, list(range(self.n)), (-self.profit).tolist())
+        # A tiny per-batch charge: balanced zero-profit cycles (2 Wood -> 3 Stick -> 2 Wood)
+        # tie up value at no profit, so without it the LP pads plans with them for free.
+        h.changeColsCost(self.n, list(range(self.n)), (-self.profit + _BATCH_CHARGE).tolist())
         inv = (-table.N).tocsr()
         h.addRows(
             inv.shape[0],
@@ -339,17 +348,11 @@ class PlanSolver:
         self._banned.update(cols)
 
     def solve(self, banned=(), forced=()) -> Recipe | None:
-        lb = np.zeros(self.n)
-        ub = self.base_ub.copy()
-        all_banned = self._banned | set(banned)
-        if all_banned:
-            ub[sorted(all_banned)] = 0.0
-        if forced:
-            lb[sorted(forced)] = EPS
+        all_banned = frozenset(self._banned | set(banned))
         for cols in self.must_rows.values():
-            if not any(ub[j] > 0 for j in cols):
+            if all(j in all_banned or self.base_ub[j] <= 0 for j in cols):
                 return None  # this partition can never touch a must-use item
-        self.h.changeColsBounds(self.n, list(range(self.n)), lb.tolist(), ub.tolist())
+        apply_bounds(self.h, self.base_ub, self.t.price, all_banned, tuple(forced))
         self.h.run()
         self.solves += 1
         if self.h.modelStatusToString(self.h.getModelStatus()).lower() != "optimal":
@@ -362,35 +365,17 @@ class PlanSolver:
         return Recipe(
             v=v,
             gain=profit / max(tied, 1e-12) - 1.0,
-            banned=frozenset(all_banned),
+            banned=all_banned,
             forced=tuple(forced),
+            held=residue_rows(self.t.N, v, self.t.price),
         )
 
     def top_k(self, k: int, deadline: float | None) -> list[Recipe]:
-        """Lawler partition over supports: the k best distinct-support plans by profit."""
-        first = self.solve()
-        if first is None or not first.support():
-            return []
-        counter = itertools.count()
-        heap: list[tuple[float, int, Recipe]] = [(-first.gain, next(counter), first)]
-        out: list[Recipe] = []
-        seen: set[tuple[int, ...]] = set()
-        while heap and len(out) < k:
-            if deadline is not None and time.monotonic() > deadline:
-                break
-            _, _, r = heapq.heappop(heap)
-            supp = r.support()
-            if supp in seen:
-                continue
-            seen.add(supp)
-            out.append(r)
-            for i, t in enumerate(supp):
-                if deadline is not None and time.monotonic() > deadline:
-                    break
-                child = self.solve(banned=r.banned | {t}, forced=r.forced + tuple(supp[:i]))
-                if child is not None and child.support():
-                    heapq.heappush(heap, (-child.gain, next(counter), child))
-        return out
+        """Lawler partition (shared with the money engine): the k best distinct plans.
+
+        Stops at the first region whose best plan makes no profit: regions come off the heap
+        best-first, so nothing after it can either."""
+        return lawler(self.solve, lambda r: polish(self, r), k, deadline, stop_gain=-1.0 + 1e-9)
 
 
 def _plan_ubs(table: Table, stock: dict[int, int], kills: int) -> np.ndarray:
@@ -430,12 +415,47 @@ def _order_plan(
     ordered = order_pool_moves(g, pool, inv)  # type: ignore[arg-type]
     if ordered is None:
         return None
-    pool_moves, _seeds = ordered
-    return stock + buys + farms + pool_moves
+    pool_moves, seeds = ordered
+    return stock + buys + seeds + farms + pool_moves
 
 
-def _finalize_plan(g: Graph, table: Table, r: Recipe, seller: int | None) -> PlanResult | None:
-    """Whole-batch replay of a plan; farm kills are rounded up (expected values)."""
+def _size_limit(
+    moves: list[tuple[Transform, int]], capital: int, stock: dict[int, int], params: PlanParams
+) -> int:
+    """How many copies of the smallest whole plan your stock, wallet and kill budget allow.
+
+    The LP is normalized (``used . v = 1``), so its absolute bounds -- held counts, the
+    wallet row, the kill budget -- never bind; quantities are enforced here instead."""
+    f: float = float("inf")
+    taken: dict[int, int] = {}
+    kills = 0
+    for t, n in moves:
+        if t.kind == STOCK:
+            item = int(t.ref.split(":", 1)[1])
+            taken[item] = taken.get(item, 0) + n
+        elif t.kind == FARM:
+            kills += n
+    for item, n in taken.items():
+        f = min(f, stock.get(item, 0) // n)
+    if capital > 0:
+        f = min(f, max(params.wallet, 0) // capital)
+    if kills > 0:
+        f = min(f, max(params.kills, 0) // kills)
+    return 1 if f == float("inf") else int(f)
+
+
+def _finalize_plan(
+    g: Graph,
+    table: Table,
+    r: Recipe,
+    seller: int | None,
+    stock: dict[int, int] | None = None,
+    params: PlanParams | None = None,
+) -> PlanResult | None:
+    """Whole-batch replay of a plan; farm kills are rounded up (expected values).
+
+    With ``stock``/``params`` the smallest whole plan is checked against what you hold, the
+    wallet and the kill budget, and then scaled up to as many copies as they allow."""
     supp_idx = r.support()
     supp = [table.cols[j] for j in supp_idx]
     v = r.v[list(supp_idx)]
@@ -481,6 +501,17 @@ def _finalize_plan(g: Graph, table: Table, r: Recipe, seller: int | None) -> Pla
         exact_gain = profit / max(tied, 1e-12) - 1.0
         if exact_gain < r.gain - max(0.01, 0.05 * abs(r.gain)):
             continue  # the rung's approximation drifted: try the next one
+        if params is not None:
+            f = _size_limit(moves, int(round(plan.capital)), stock or {}, params)
+            if f < 1:
+                return None  # even one copy needs more than you hold or can spend
+            if f > 1:
+                moves = [(t, n * f) for t, n in moves]
+                kills_total *= f
+                plan = simulate([t for t, _ in moves], [n for _, n in moves], price)
+                if plan is None:  # pragma: no cover - scaling cannot break a plan
+                    return None
+                profit = int(round(plan.profit + plan.leftover_value))
         return PlanResult(
             moves=moves,
             profit=profit,
@@ -511,7 +542,7 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
 
     # free-money loops live in craft/shimmer space; stock/farm are bounded, never loops
     loop_ctx = _LoopContext(_loop_table(g))
-    loops = find_free_loops(loop_ctx)
+    loops = find_free_loops(loop_ctx, deadline)
     col_index = {t: j for j, t in enumerate(table.cols)}
     solver = PlanSolver(
         table, _plan_ubs(table, stock, params.kills), params.wallet, params.must_use
@@ -537,7 +568,7 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
                 touched.update(i for i, _ in table.cols[j].inputs + table.cols[j].outputs)
             if not params.must_use <= touched:
                 continue
-        res = _finalize_plan(g, table, r, seller)
+        res = _finalize_plan(g, table, r, seller, stock, params)
         if res is None:
             continue
         if res.profit < params.min_profit:
@@ -555,7 +586,7 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
         stock=stock,
         loops=loops,
         solves=solver.solves + loop_ctx.solves,
-        complete=deadline is None or elapsed <= deadline + 5.0,
+        complete=deadline is None or time.monotonic() <= deadline,
         elapsed=elapsed,
     )
 

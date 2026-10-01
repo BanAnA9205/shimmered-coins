@@ -88,8 +88,15 @@ expressed.
 **Scaling.** `k·v` has the same gain and the same support as `v`, so it is the same recipe.
 Recipes are rays.
 
-**Definition.** `v` is **atomic** if `cost·v > 0` and there is no recipe `w ≠ 0` with
-`supp(w) ⊊ supp(v)`.
+**Definition.** The **key** of `v` is its moves plus the items it ends up holding:
+`key(v) = supp(v) ∪ {i : (N·v)_i > 0}`. `v` is **atomic** if `cost·v > 0` and there is no recipe
+`w ≠ 0` with `key(w) ⊊ key(v)`.
+
+The leftover items have to be part of the key. "Buy Ore, shimmer to Gem, sell Gem" uses a subset
+of the moves of "buy Ore, craft Bar, shimmer, craft Ring, sell Ring". On moves alone the Ring
+recipe would look non-atomic, even though it can't be split into smaller recipes. With the
+leftovers included, the two keys differ (Gem vs Ring is left over). This matches elementary flux
+modes with an explicit outflow per item.
 
 This covers both non-atomic examples:
 
@@ -147,10 +154,15 @@ A positive optimum means a loop exists.
 The gain is the optimum − 1. It's one LP.
 
 ### 4.3 Top-K recipes (Lawler ranking)
-1. Solve 4.2. The result is recipe #1, with support `S = {t₁ … tₘ}`.
-2. Split the rest of the search space into `m` disjoint sub-problems. Sub-problem `i` forbids `tᵢ`
-   (upper bound 0) and requires `t₁ … tᵢ₋₁` (lower bound ε, which is well defined because spend is
-   fixed to 1). Each is one LP, warm-started from its parent in HiGHS.
+1. Solve 4.2. The result is recipe #1, with key `S = {e₁ … eₘ}` (moves and leftover items).
+2. Split the rest of the search space into `m` disjoint sub-problems. Sub-problem `i` forbids `eᵢ`
+   and requires `e₁ … eᵢ₋₁`. Each is one LP, warm-started from its parent in HiGHS.
+   - For a move, "forbid" is an upper bound of 0, and "require" is a lower bound of ε. ε is well
+     defined because spend is fixed to 1.
+   - For a leftover item, "forbid" is `(N·v)_i = 0`, and "require" is a row bound
+     `(N·v)_i ≥ ε / pᵢ`: ε copper's worth.
+   - **Always split the region on its own optimum's key**, even when the cleaned-up recipe
+     reported for it duplicates an earlier one. Skipping the split would lose the whole region.
 3. Keep all open sub-problems in a priority queue by optimum. Pop the best one to get the next
    recipe, split it the same way, and repeat until K recipes are found.
 4. **Required moves can yield a sum** of atomic recipes rather than a vertex. In that case,
@@ -159,7 +171,7 @@ The gain is the optimum − 1. It's one LP.
    2. Subtract as much of that part as possible.
    3. Repeat.
 
-   Each part is a candidate. Deduplicate by support.
+   Each part is a candidate. Deduplicate by key.
 5. Sub-problems are independent, so they run in a process pool with one HiGHS instance per worker.
 
 ### 4.4 Constraints

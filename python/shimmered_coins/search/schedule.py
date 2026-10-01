@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ..model.graph import Graph, Transform
 
 POOL = "shimmer pool"
+_MAX_ROUNDS = 1000  # cycles run in rounds of the seed's size; more rounds = unplayable
 TRAVEL = "Travelling Merchant"
 
 
@@ -56,7 +57,9 @@ def order_pool_moves(
     seeds: list[tuple[Transform, int]] = []
     seeded: set[int] = set()
 
-    while pending:
+    for _ in range(_MAX_ROUNDS):
+        if not pending:
+            break
         progressed = False
         for t in sorted(pending, key=lambda x: x.id):
             can = pending[t]
@@ -92,6 +95,8 @@ def order_pool_moves(
         inv[item] = inv.get(item, 0) + need
         seeds.append((buy, need))
         seeded.add(item)
+    if pending:
+        return None  # a seeded cycle that would need too many rounds to be a practical loop
     return out, seeds
 
 

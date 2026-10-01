@@ -1,6 +1,7 @@
 # Project status
 
-Written after the bug audit of 2026-09-30 (open PR #7, branch `feat/engine-sprites-world`).
+Written after the bug audit of 2026-09-30, updated after the second audit of 2026-10-01 (PR #8,
+branch `feat/engine-sprites-world`).
 This file is the "where are we" summary; [`PLAN.md`](PLAN.md) is the original MVP plan and
 [`ALGORITHM.md`](ALGORITHM.md) the engine design.
 
@@ -24,9 +25,15 @@ This file is the "where are we" summary; [`PLAN.md`](PLAN.md) is the original MV
 
 ## In flight
 
-- **PR #7** (`feat/engine-sprites-world`): the recipe engine, sprites tab, world parser, drop
-  tables and the pivot plan engine (`shimcoins plan` + the UI's Plan tab), plus an audit pass.
-  Branch names are `feat/...` from now on.
+- **PR #8** (`feat/engine-sprites-world`): the pivot plan engine (`shimcoins plan` + the UI's
+  Plan tab), plus two audit passes. Branch names are `feat/...` from now on.
+- Second audit fixed:
+  - plans ignored how many items you hold and how much you can spend; now checked and scaled;
+  - top-K could skip recipes whose moves contain another recipe's moves (ALGORITHM.md 3, 4.3);
+  - `shimcoins plan` hung on the demo world: zero-profit cycles padded loss-making plans;
+  - the Plan tab's unchecked items were ignored by the API;
+  - `plan --json` crashed;
+  - the "stopped early" flag never fired.
 
 ## Local data assets (gitignored, machine-specific)
 
@@ -71,6 +78,6 @@ The crafting-assistant search is live: `shimcoins plan <dataset> --world your.wl
 ## Conventions
 
 - Branches: `feat/<thing>`; PRs into `main`; PRs get squashed after review.
-- Tests: `pytest` (92 passing after the plan engine, incl. mono-backed extractor tests);
+- Tests: `pytest` (98 passing after the second audit, incl. mono-backed extractor tests);
   lint `ruff check` + `ruff format --check`. The C# extractor builds with the mono env.
 - Data never commits: game data, sprites and world saves stay local (`data/`, `web/public/`).

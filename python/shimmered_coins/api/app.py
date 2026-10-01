@@ -317,10 +317,15 @@ def create_app() -> FastAPI:
         from ..search.plan import PlanParams, plan, stock_from_world
 
         ds = get_dataset(req.dataset)
-        stock: dict[int, int] = dict(req.stock or {})
-        if req.world:
+        # The UI sends the world *and* the items left checked: the checked list wins, so
+        # unchecking an item really keeps it out of the plan. The world is read only when
+        # no stock list came with it.
+        stock: dict[int, int] = {int(k): int(v) for k, v in (req.stock or {}).items() if v > 0}
+        if req.world and req.stock is None:
             from ..data.world import parse_world
 
+            if not req.world.endswith(".wld"):
+                raise HTTPException(400, "not a .wld file")
             stock = stock_from_world(parse_world(req.world))
         if not stock and req.kills == 0:
             raise HTTPException(

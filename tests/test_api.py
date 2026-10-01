@@ -80,3 +80,26 @@ def test_worlds_endpoint_lists_saves_or_empty(client):
     assert isinstance(worlds, list)
     for w in worlds:
         assert "path" in w and ("error" in w or "chests" in w)
+
+
+def test_plan_uses_only_the_checked_stock(client, tmp_path):
+    """The UI posts the world *and* the items left checked; unchecked items stay out."""
+    from test_world import build_wld
+
+    data, _ = build_wld(chests=(((1, 2), "", [(1, 0, 6), (2, 0, 1), (3, 0, 2)]),))
+    world = tmp_path / "w.wld"
+    world.write_bytes(data)
+    body = {
+        "dataset": "demo",
+        "world": str(world),
+        "npcs": {"1": 1.0, "2": 1.0},
+        "flags": ["downedboss"],
+        "top_n": 5,
+        "show_liquidation": True,
+    }
+    everything = client.post("/api/plan", json=body).json()
+    assert any("Gem" in m["text"] for r in everything["results"] for m in r["moves"])
+    only_ore = client.post("/api/plan", json={**body, "stock": {"1": 6}}).json()
+    for r in only_ore["results"]:
+        for m in r["moves"]:
+            assert not (m["text"].startswith("take") and ("Gem" in m["text"] or "Bar" in m["text"]))

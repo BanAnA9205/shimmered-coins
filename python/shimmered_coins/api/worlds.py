@@ -14,7 +14,6 @@ def _save_roots() -> list[Path]:
     roots = [Path(env)] if env else []
     roots += [
         home / ".local/share/Terraria/Worlds",  # native Linux / Proton saves
-        Path.home().parent / "banana9205" / ".local/share/Terraria/Worlds",
         # Steam play on Windows-style layouts is unlikely here; add common ones anyway
         home / "Documents/My Games/Terraria/Worlds",
         home / "AppData/Roaming/Terraria/Worlds",
