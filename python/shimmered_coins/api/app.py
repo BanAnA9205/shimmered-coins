@@ -76,7 +76,6 @@ class _WorldSetup(BaseModel):
     flags: list[str] = []
     shimmer: bool = True
     discount: bool = False
-    travel_stock: list[int] = []
     kinds: list[str] = []
     time_limit: float = Field(30.0, gt=0, le=MAX_TIME_LIMIT)
 
@@ -90,7 +89,6 @@ class SearchRequest(_WorldSetup):
     npcs: dict[int, float | NpcIn] = Field(
         default_factory=dict, description="npc id -> price adjustment, or {adjustment, zones}"
     )
-    travel_stock: list[int] = []
     kinds: list[str] = list(KINDS)
     include: list[int] | None = None
     exclude: list[int] = []
@@ -166,7 +164,6 @@ def npc_setup(req: SearchRequest) -> NpcSetup:
         happiness=happiness,
         discount=req.discount,
         zones=npc_zones,
-        travel_stock=frozenset(req.travel_stock),
     )
 
 
@@ -185,7 +182,6 @@ def _move_json(g: Graph, t: Transform, batches: int, text: str) -> dict:
         "cost": t.cost * batches,
         "revenue": t.revenue * batches,
         "npc": npc.name if npc else None,
-        "limited": t.limited,
     }
 
 
@@ -466,7 +462,6 @@ def create_app() -> FastAPI:
                     "places": r.places,
                     "score": r.score,
                     "per_trip": r.per_trip,
-                    "one_shot": r.one_shot,
                     "moves": [_move_json(g, m.transform, m.batches, m.text) for m in r.moves],
                     "leftover": [
                         {"id": i, "name": g.name(i), "count": c} for i, c in r.leftover.items()

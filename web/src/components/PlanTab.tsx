@@ -15,7 +15,6 @@ interface Props {
   shimmer: boolean;
   discount: boolean;
   npcs: Record<number, { adjustment: number; zones: string[] | "any" }>;
-  travel: { id: number }[];
 }
 
 /**
@@ -92,7 +91,6 @@ export function PlanTab(props: Props) {
       flags: props.flags,
       shimmer: props.shimmer,
       discount: props.discount,
-      travel_stock: props.travel.map((i) => i.id),
       kinds: ["buy", "craft", "shimmer"],
       include: null,
       exclude: [],

@@ -44,7 +44,6 @@ export interface MoveOut {
   cost: number;
   revenue: number;
   npc: string | null;
-  limited: boolean;
 }
 
 export interface ResultOut {
@@ -58,7 +57,6 @@ export interface ResultOut {
   places: string[];
   score: number;
   per_trip: number;
-  one_shot: boolean;
   moves: MoveOut[];
   leftover: Stack[];
 }
@@ -77,7 +75,6 @@ export interface SearchRequest {
   shimmer: boolean;
   discount: boolean;
   npcs: Record<number, NpcIn>;
-  travel_stock: number[];
   kinds: Kind[];
   include: number[] | null;
   exclude: number[];
@@ -201,7 +198,6 @@ export interface PlanMove {
   cost?: number;
   revenue?: number;
   npc?: string | null;
-  limited?: boolean;
 }
 
 export interface PlanResult {
@@ -238,7 +234,6 @@ export interface PlanRequest {
   flags: string[];
   shimmer: boolean;
   discount: boolean;
-  travel_stock: number[];
   kinds: Kind[];
   include: number[] | null;
   exclude: number[];

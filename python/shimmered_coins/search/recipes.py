@@ -131,7 +131,7 @@ class Solver:
         self.solves = 0
         self._banned: set[int] = set()
         inf = highspy.kHighsInf
-        self.base_ub = np.array([1.0 if c.limited else inf for c in table.cols], dtype=float)
+        self.base_ub = np.full(self.n, inf, dtype=float)
         h = highspy.Highs()
         h.setOptionValue("output_flag", False)
         h.addVars(self.n, [0.0] * self.n, self.base_ub.tolist())

@@ -17,15 +17,12 @@ if TYPE_CHECKING:
 
 POOL = "shimmer pool"
 _MAX_ROUNDS = 1000  # cycles run in rounds of the seed's size; more rounds = unplayable
-TRAVEL = "Travelling Merchant"
 
 
 def tour_places(g: Graph, supp: list[Transform], seller_id: int | None) -> list[str]:
     """The distinct places the loop visits, in tour order (ALGORITHM.md 5)."""
     npc_ids = sorted({t.npc for t in supp if t.kind == "buy" and t.npc is not None})
     places = [g.dataset.npcs[n].name for n in npc_ids if n in g.dataset.npcs]
-    if any(t.kind == "buy" and t.npc is None for t in supp):
-        places.append(TRAVEL)
     if any(t.kind == "shimmer" for t in supp):
         places.append(POOL)
     if seller_id is not None:

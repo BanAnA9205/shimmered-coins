@@ -172,7 +172,6 @@ def cmd_plan(a: argparse.Namespace) -> int:
         happiness=happiness,
         discount=a.discount,
         zones=npc_zones,
-        travel_stock=_items(ds, a.travel_stock),
     )
     stock: dict[int, int] = {}
     if a.world:
@@ -277,7 +276,6 @@ def cmd_search(a: argparse.Namespace) -> int:
         happiness=happiness,
         discount=a.discount,
         zones=npc_zones,
-        travel_stock=_items(ds, a.travel_stock),
     )
     kinds = frozenset(a.kinds.split(",")) if a.kinds else frozenset(KINDS)
     kinds |= {SELL}  # selling is implicit: the residue is sold at the end
@@ -319,7 +317,6 @@ def cmd_search(a: argparse.Namespace) -> int:
                             "places": r.places,
                             "score": r.score,
                             "per_trip": r.per_trip,
-                            "one_shot": r.one_shot,
                             "moves": [
                                 {"kind": m.transform.kind, "batches": m.batches, "text": m.text}
                                 for m in r.moves
@@ -493,9 +490,6 @@ def _add_world_args(p: argparse.ArgumentParser) -> None:
         metavar="NAME[=ADJ][@ZONES]",
         help="present NPC, its happiness price adjustment (0.75 happiest..1.5) and the biome "
         "zones it lives in, e.g. Merchant=0.9@snow or Merchant@any (try every biome)",
-    )
-    p.add_argument(
-        "--travel-stock", action="append", help="item the Travelling Merchant sells today"
     )
     p.add_argument(
         "--all-npcs", metavar="ADJ[@ZONES]", help="all shop NPCs present at ADJ, e.g. 0.75@any"

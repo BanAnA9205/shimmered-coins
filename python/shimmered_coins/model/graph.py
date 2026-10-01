@@ -31,7 +31,6 @@ class Transform:
     cost: int = 0  # copper spent per batch
     revenue: int = 0  # copper earned per batch
     npc: int | None = None
-    limited: bool = False  # limited shop stock; a loop using it is not repeatable
     ref: str = ""  # provenance, e.g. "recipe:123" or "shimmer:decraft"
 
     @property
@@ -80,9 +79,7 @@ class Graph:
         if t.kind == BUY:
             npc = self.dataset.npcs.get(t.npc) if t.npc is not None else None
             who = f" from {npc.name}" if npc else ""
-            if t.ref == "travel":
-                who = " from the Travelling Merchant"
-            elif "@" in t.ref:
+            if "@" in t.ref:
                 who += f" (living in {t.ref.split('@', 1)[1].replace('+', ' & ')})"
             return f"buy {fmt(t.outputs)}{who} for {format_coins(t.cost * batches)}"
         if t.kind == SELL:
@@ -162,6 +159,8 @@ def build_graph(
         for s in ds.shops:
             if s.currency != "coins" or not npcs.present(s.npc):
                 continue
+            if s.limited:
+                continue  # buy-once stock can't be repeated in a loop: not modelled yet
             if not conditions_hold(s.conditions, world, s.npc, npcs):
                 continue
             outs = ((s.item, 1),)
@@ -178,23 +177,10 @@ def build_graph(
                 zones = [c[5:] for c in s.conditions if c.lower().startswith("zone:")]
                 if zones:
                     ref += "@" + "+".join(zones)
-            t = Transform(0, BUY, (), outs, cost=price, npc=s.npc, limited=s.limited, ref=ref)
+            t = Transform(0, BUY, (), outs, cost=price, npc=s.npc, ref=ref)
             cur = offers.get((s.npc, s.item))
-            if cur is None or (price, t.limited) < (cur.cost, cur.limited):
-                offers[(s.npc, s.item)] = t
-        for item in npcs.travel_stock:
-            outs = ((item, 1),)
-            it = items.get(item)
-            if it is None or it.value <= 0 or not allowed(outs):
-                continue
-            price = buy_price(it.value, 1.0, npcs.discount)
-            if price <= 0:
-                continue
-            cur = offers.get((None, item))
             if cur is None or price < cur.cost:
-                offers[(None, item)] = Transform(
-                    0, BUY, (), outs, cost=price, limited=True, ref="travel"
-                )
+                offers[(s.npc, s.item)] = t
         raw.extend(offers.values())
 
     # Sell: any shop NPC buys anything at value/5 adjusted by the happiest NPC.
@@ -267,7 +253,7 @@ def _finalize(ds: Dataset, ts: list[Transform], npcs: NpcSetup | None = None) ->
         if t.kind == BUY:
             item = t.outputs[0][0]
             cur = g.buy_of.get(item)  # helpers keep the cheapest offer per item
-            if cur is None or (t.cost, t.limited) < (cur.cost, cur.limited):
+            if cur is None or t.cost < cur.cost:
                 g.buy_of[item] = t
         elif t.kind == SELL:
             g.sell_of[t.inputs[0][0]] = t
@@ -279,4 +265,4 @@ def _finalize(ds: Dataset, ts: list[Transform], npcs: NpcSetup | None = None) ->
 
 
 def _fields(t: Transform) -> tuple:
-    return (t.kind, t.inputs, t.outputs, t.cost, t.revenue, t.npc, t.limited, t.ref)
+    return (t.kind, t.inputs, t.outputs, t.cost, t.revenue, t.npc, t.ref)

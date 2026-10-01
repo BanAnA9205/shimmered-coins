@@ -46,13 +46,11 @@ def test_npc_setup_parses_zones():
 
     req = SearchRequest(
         npcs={1: 1.0, 2: {"adjustment": 0.9, "zones": ["snow"]}, 3: {"zones": "any"}},
-        travel_stock=[5],
     )
     setup = npc_setup(req)
     assert setup.happiness == {1: 1.0, 2: 0.9, 3: 1.0}
     assert setup.zones_of(2) == frozenset({"snow"})
     assert setup.zones_of(3) == "any"
-    assert setup.travel_stock == frozenset({5})
 
 
 def test_plan_endpoint_runs(client):

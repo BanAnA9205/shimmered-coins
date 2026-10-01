@@ -73,7 +73,6 @@ The options below describe the world and NPC setup:
 | option | effect |
 |--------|--------|
 | `--npc Merchant=0.85@snow` | present NPC, its happiness price adjustment (0.75 happiest .. 1.5) and the biome(s) it lives in (`@any`: try every biome) |
-| `--travel-stock "Item"` | what the Travelling Merchant sells today |
 | `--all-npcs 1` | every shop NPC present at the given adjustment |
 | `--flag hardmode` | world flags (progression, world evil, events, ...) |
 | `--include`, `--exclude`, `--must-use`, `--start` | constrained search on specific items |

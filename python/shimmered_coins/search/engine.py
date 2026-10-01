@@ -54,13 +54,12 @@ class Result:
     length: int
     score: float
     per_trip: float  # exp(score): "x m per trip"
-    one_shot: bool
 
     def summary(self, g: Graph) -> str:
         lines = [
             f"gain {self.gain:+.2%}  ×{self.per_trip:.2f} per trip  (L={self.length}: "
             f"{', '.join(self.places)}; capital {format_coins(self.capital)}, "
-            f"profit {format_coins(self.profit)}" + (", one-shot" if self.one_shot else "") + ")"
+            f"profit {format_coins(self.profit)})"
         ]
         lines += [f"  {k + 1}. {m.text}" for k, m in enumerate(self.moves)]
         if self.leftover:
@@ -131,8 +130,7 @@ def _finalize(
                 drift = r.gain - plan.gain
                 if drift > max(0.02, 0.05 * abs(r.gain)):
                     continue
-                one_shot = any(t.limited for t, _ in plan_moves)
-                if params.wallet is not None and not one_shot:
+                if params.wallet is not None:
                     # present repeatable plans at the size of your wallet
                     f = params.wallet // plan.capital
                     if f > 1:
@@ -168,7 +166,6 @@ def _result_from(g, supp, plan_moves, plan, r, params, seller) -> Result:
         length=length,
         score=sc,
         per_trip=math.exp(sc) if math.isfinite(sc) else 0.0,
-        one_shot=any(t.limited for t, _ in plan_moves),
     )
 
 

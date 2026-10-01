@@ -48,8 +48,6 @@ class NpcSetup:
     ``zones`` maps npc id -> the biome zones where you talk to it (e.g. ``{"snow"}``), or
     ``ANY_ZONE`` to consider every biome. Shop conditions like ``zone:snow`` are checked against
     the selling NPC's own zones. NPCs without an entry stand in no special biome.
-
-    ``travel_stock`` is today's Travelling Merchant stock (random in game, so entered by hand).
     """
 
     happiness: dict[int, float] = field(default_factory=dict)
@@ -58,7 +56,6 @@ class NpcSetup:
     # Player.GetItemExpectedPrice for every supported version.
     happiness_affects_selling: bool = True
     zones: dict[int, frozenset[str] | str] = field(default_factory=dict)
-    travel_stock: frozenset[int] = frozenset()
 
     def present(self, npc: int) -> bool:
         return npc in self.happiness

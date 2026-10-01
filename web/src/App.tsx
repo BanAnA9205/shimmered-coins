@@ -21,7 +21,6 @@ interface Settings {
   shimmer: boolean;
   discount: boolean;
   npcs: Record<number, NpcIn>; // present NPC -> happiness price adjustment + biome
-  travel: ItemRef[];
   kinds: Kind[];
   topN: number;
   overhead: number; // fixed per-loop effort c in the score
@@ -41,7 +40,6 @@ const DEFAULTS: Settings = {
   shimmer: true,
   discount: false,
   npcs: {},
-  travel: [],
   kinds: ALL_KINDS,
   topN: 10,
   overhead: 1,
@@ -163,7 +161,6 @@ export default function App() {
         shimmer: s.shimmer,
         discount: s.discount,
         npcs: s.npcs,
-        travel_stock: s.travel.map((i) => i.id),
         kinds: s.kinds,
         include: s.include.length ? s.include.map((i) => i.id) : null,
         exclude: s.exclude.map((i) => i.id),
@@ -356,15 +353,6 @@ export default function App() {
                 );
               })}
             </div>
-            {info && (
-              <ItemPicker
-                dataset={s.dataset}
-                label="Travelling Merchant sells today"
-                hint="his stock is random, so enter what he has"
-                value={s.travel}
-                onChange={(v) => set("travel", v)}
-              />
-            )}
           </section>
         </aside>
 
@@ -376,7 +364,6 @@ export default function App() {
               shimmer={s.shimmer}
               discount={s.discount}
               npcs={s.npcs}
-              travel={s.travel}
             />
           ) : tab === "sprites" ? (
             <SpritesTab dataset={s.dataset} />

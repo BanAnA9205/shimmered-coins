@@ -84,8 +84,6 @@ def test_cli_npc_zones(capsys):
     plain = moves_available(capsys)
     assert main(args + ["--npc", "Merchant=1@snow,forest"]) == 0
     assert moves_available(capsys) > plain  # the snow-only Frost Charm becomes buyable
-    assert main(args + ["--npc", "Merchant", "--travel-stock", "Kit"]) == 0
-    assert moves_available(capsys) > plain
     assert main(["data", "info", str(TOY)]) == 0
     info = json.loads(capsys.readouterr().out)
     assert info["zones"] == ["snow"]

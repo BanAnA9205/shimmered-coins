@@ -17,7 +17,7 @@ Stack decisions:
 
 ## 1. Domain facts that shape the design (check each one against the extracted code)
 - **Selling:** every shop NPC buys every sellable item for the same base amount, `value/5` in copper coins. Which NPC you sell to only matters through that NPC's **happiness price multiplier** (about 0.75–1.5). So the engine only needs one `sell_mult`, which is the best multiplier among available NPCs. It does not need a table of NPCs per item. *Check in `Player.GetItemExpectedPrice` / `ShopHelper` that happiness really changes sell prices and not only buy prices. If it doesn't, `sell_mult = 1`.*
-- **Buying:** the price is `value × npc_happiness_mult × (0.8 if Discount Card/Greedy Ring)`. Shop stock depends on world state: hardmode, bosses defeated, moon phase, biome, world evil, day or night, and the Travelling Merchant's random stock. Some shops use special currencies (Defender Medals) and are out of scope for the MVP.
+- **Buying:** the price is `value × npc_happiness_mult × (0.8 if Discount Card/Greedy Ring)`. Shop stock depends on world state: hardmode, bosses defeated, moon phase, biome, world evil, and day or night. The Travelling Merchant (random stock) is not supported in this version. Some shops use special currencies (Defender Medals) and are out of scope for the MVP.
 - **Shimmer quirks to model:**
   - One-to-one transmutations (`ItemID.Sets.ShimmerTransformToItem`), some locked behind progression.
   - **Decrafting** uses the *first* decraftable recipe and consumes full batches only (needs `stack ≥ recipe.createStack`; the remainder is left over).

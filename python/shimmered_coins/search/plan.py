@@ -386,8 +386,6 @@ def _plan_ubs(table: Table, stock: dict[int, int], kills: int) -> np.ndarray:
             out.append(float(stock[int(t.ref.split(":", 1)[1])]))
         elif t.kind == FARM:
             out.append(float(max(kills, 0)))
-        elif t.limited:
-            out.append(1.0)
         else:
             out.append(inf)
     return np.array(out, dtype=float)

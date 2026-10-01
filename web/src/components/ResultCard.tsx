@@ -52,15 +52,9 @@ export function ResultCard({ result, rank }: { result: ResultOut; rank: number }
         <span className="result-meta">
           capital <Coins copper={result.capital} /> · profit <Coins copper={result.profit} />
         </span>
-        {result.one_shot ? (
-          <span className="badge badge-loop" title="uses limited shop stock: not repeatable">
-            One-shot
-          </span>
-        ) : (
-          <span className="badge badge-loop" title="no limited-stock items: repeat forever">
-            Repeatable loop
-          </span>
-        )}
+        <span className="badge badge-loop" title="only regular shop stock: repeat forever">
+          Repeatable loop
+        </span>
       </header>
       <div className="steps">
         {result.moves.map((m, i) => (

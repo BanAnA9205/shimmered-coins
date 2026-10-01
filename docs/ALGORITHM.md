@@ -41,7 +41,7 @@ Per item:
 
 - `p_i`: copper received when selling one unit. It is 0 if the item can't be sold.
 
-World flags, NPCs (happiness, biome, who is present), Travelling Merchant stock and user filters
+World flags, NPCs (happiness, biome, who is present) and user filters
 decide which columns exist. `model/graph.py` already builds exactly this; each `Transform` is one
 column.
 
@@ -181,8 +181,8 @@ Every user constraint is a bound or a row:
 - **only these items:** drop the other columns;
 - **must use X:** a row requiring some column that touches X;
 - **first purchase in S:** drop the other buy columns;
-- **limited stock** (Travelling Merchant): upper bound on the buy column. The recipe is then
-  flagged *one-shot*, because it can't be repeated or compounded.
+- **limited stock:** not modelled in this version. Buy-once shop entries are left out of the
+  table, and the Travelling Merchant isn't supported.
 - **cap on places visited:** binary visit variables make it a MILP, still in HiGHS (6.2).
 
 ## 5. Phase 2: ordering and length
@@ -265,8 +265,7 @@ is already in the tour, such as the seller, can remove a whole trip and raise th
 - `(1 + gain) / √L` was rejected. It rewards getting the stake back: a break-even loop with L = 1
   scores 1.0 and beats +30% with L = 2 (0.92). It also isn't stable under repetition.
 
-Results report gain, `L`, and the score as "×m per trip", where `m = exp(score)`. One-shot recipes
-(limited stock) are shown with their score, labelled as not repeatable.
+Results report gain, `L`, and the score as "×m per trip", where `m = exp(score)`.
 
 ### 6.2 Using L in phase 1
 Any score that rises with gain and falls with `L` is maximized on the gain-vs-`L` Pareto front.
