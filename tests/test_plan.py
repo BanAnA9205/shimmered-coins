@@ -12,8 +12,7 @@ from shimmered_coins.search.plan import (
     plan,
     stock_from_world,
 )
-
-from tests.test_world import REAL
+from test_world import REAL
 
 
 def plan_dataset(ring_drops=()) -> Dataset:
