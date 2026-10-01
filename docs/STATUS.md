@@ -15,6 +15,8 @@ This file is the "where are we" summary; [`PLAN.md`](PLAN.md) is the original MV
   against the real 1.4.5.8 dataset; pricing formulas match the game's own probe 50/50.
 - **`shimcoins world <file.wld>`** — parses real saves: 480 + 296 filled chests and town NPC
   homes across the two local worlds (`Feral_Dreamland_of_Pizza.wld`, `joe.wld`).
+- **`shimcoins plan <dataset> --world <file.wld>`** — the pivot search: best plans out of
+  your chest items, optional buying (`--wallet`) and farming EVs (`--farm`).
 - **NPC drop tables** — 444 NPCs / 2,368 EV entries on 1.4.5.8, extracted through the game's own
   `ReportDroprates` API. In the dataset (`npc_drops`) for the farming-EV engine.
 - **`shimcoins serve`** — web UI with Search + Sprites tabs, the Sprites tab imports item art
@@ -22,9 +24,9 @@ This file is the "where are we" summary; [`PLAN.md`](PLAN.md) is the original MV
 
 ## In flight
 
-- **PR #7** (`feat/engine-sprites-world`): the recipe engine, sprites tab, world parser and drop
-  tables, plus an audit pass (post-filter under-fetch fix, corrupt-world hardening, CLI fixes).
-  Merge this before starting anything new; branch names are `feat/...` from now on.
+- **PR #7** (`feat/engine-sprites-world`): the recipe engine, sprites tab, world parser, drop
+  tables and the pivot plan engine (`shimcoins plan` + the UI's Plan tab), plus an audit pass.
+  Branch names are `feat/...` from now on.
 
 ## Local data assets (gitignored, machine-specific)
 
@@ -38,25 +40,37 @@ This file is the "where are we" summary; [`PLAN.md`](PLAN.md) is the original MV
 If a dataset is missing: `shimcoins data fetch 1.4.5.8 --yes` (needs `shimcoins-mono` on PATH).
 If sprites are missing: open the Sprites tab, or `shimcoins sprites`.
 
-## Next up: the crafting-assistant pivot
+## The pivot search (shipped 2026-10-01)
 
-The exploit-hunting days are done (1.4.5 patched the shop economy dry — the `data diff` between
-1.4.4.9 and 1.4.5.8 shows the repricing). The roadmap shipped with the pivot discussion:
+The crafting-assistant search is live: `shimcoins plan <dataset> --world your.wld`.
 
-1. **Phase C — source engine** (`shimcoins plan`, the next milestone):
-   - your items as bounded zero-cost columns (chests from `shimcoins world`),
-   - farming as EV columns (the `npc_drops` data is ready and unused),
-   - "what can I make / help me craft X" modes, effort in action units.
-2. **Phase D — world integration in the UI**: world picker, storage-chest selection (the world
-   format has no "who placed this chest" flag, so region-select), NPC detection with homes and
-   happiness from the extracted preference database.
-3. **Later**: MILP L-level Pareto front (§6.2 — `--max-places` is a post-filter, with the
-   audit's over-fetch of 5× as a stopgap), neutral catalogue (§6.3), LZX-style deep checks for
-   the 1.4.5.8 town-rooms section header.
+- **World stock:** every item lying in any chest of a parsed world becomes your stock; you
+  uncheck what you'd rather keep (the save format does not record who placed a chest, so
+  per-item choosing is the design, not a heuristic).
+- **Sources:** held items (zero-cost columns bounded by how many you hold) + shops (bounded by
+  `--wallet`) + farming (per-kill expected-value columns through the game's own loot tables),
+  to be combined with crafts and shimmer moves as one profit-maximizing LP.
+- **Farming checkbox:** turns the same run's farming columns on — plans that need drops are
+  ranked alongside stock-only plans, amounts shown as expected values per kill.
+- The UI has a **Plan** tab: pick a world, uncheck stock items, tick "with farming", run.
+- CLI mirror: `shimcoins plan data/1.4.5.8 --world ~/.local/share/Terraria/Worlds/joe.wld
+  --all-npcs 0.75 --wallet 50g --farm 500 --top 5`
+
+## Still to do (later milestones)
+
+1. **Goal mode:** "craft X the cheapest way from this stock" (backward reachability over the
+   same graph) — the follow-up API/UI work in phase C.
+2. **NPC homes & suggested happiness** from `shimcoins world` into the plan UI (the data is
+   already parsed; only the wiring is left).
+3. **Farming EV in the main path:** all farm recipes currently resolve to buy-only chains;
+   a displayed constraint: bosses show up as droppers of one-per-kill treasures — verify
+   these look right for summoned bosses vs. normal spawn-and-kill loops.
+4. **MILP L-level Pareto front** (§6.2 — `--max-places` is a post-filter with 5× oversampling
+   as a stopgap), neutral catalogue (§6.3).
 
 ## Conventions
 
 - Branches: `feat/<thing>`; PRs into `main`; PRs get squashed after review.
-- Tests: `pytest` (80 passing at audit time, incl. mono-backed extractor tests);
+- Tests: `pytest` (92 passing after the plan engine, incl. mono-backed extractor tests);
   lint `ruff check` + `ruff format --check`. The C# extractor builds with the mono env.
 - Data never commits: game data, sprites and world saves stay local (`data/`, `web/public/`).

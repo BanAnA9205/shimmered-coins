@@ -10,6 +10,7 @@ import {
 } from "./api";
 import { ItemPicker } from "./components/ItemPicker";
 import { ResultCard } from "./components/ResultCard";
+import { PlanTab } from "./components/PlanTab";
 import { SpritesTab } from "./components/SpritesTab";
 
 const ALL_KINDS: Kind[] = ["buy", "craft", "shimmer"];
@@ -109,7 +110,7 @@ function mood(adj: number): string {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<"search" | "sprites">("search");
+  const [tab, setTab] = useState<"search" | "plan" | "sprites">("search");
   const [s, setS] = useState<Settings>(loadSettings);
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [info, setInfo] = useState<DatasetInfo | null>(null);
@@ -197,6 +198,12 @@ export default function App() {
             onClick={() => setTab("search")}
           >
             Search
+          </button>
+          <button
+            className={`tab ${tab === "plan" ? "active" : ""}`}
+            onClick={() => setTab("plan")}
+          >
+            Plan
           </button>
           <button
             className={`tab ${tab === "sprites" ? "active" : ""}`}
@@ -362,7 +369,16 @@ export default function App() {
         </aside>
 
         <main className="main">
-          {tab === "sprites" ? (
+          {tab === "plan" ? (
+            <PlanTab
+              dataset={s.dataset}
+              flags={s.flags}
+              shimmer={s.shimmer}
+              discount={s.discount}
+              npcs={s.npcs}
+              travel={s.travel}
+            />
+          ) : tab === "sprites" ? (
             <SpritesTab dataset={s.dataset} />
           ) : (
           <>

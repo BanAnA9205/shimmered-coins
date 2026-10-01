@@ -161,6 +161,105 @@ def cmd_data_diff(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plan(a: argparse.Namespace) -> int:
+    from .data.world import parse_world
+    from .search.plan import PlanParams, plan, stock_from_world
+
+    ds = load_dataset(a.dataset)
+    happiness, npc_zones = _npcs(ds, a.npc, a.all_npcs)
+    world = WorldConfig(flags=frozenset(a.flag or ()), shimmer=not a.no_shimmer)
+    npcs = NpcSetup(
+        happiness=happiness,
+        discount=a.discount,
+        zones=npc_zones,
+        travel_stock=_items(ds, a.travel_stock),
+    )
+    stock: dict[int, int] = {}
+    if a.world:
+        w = parse_world(a.world)
+        stock = stock_from_world(w, frozenset(_items(ds, a.exclude)))
+        print(
+            f"world {w.name!r}: {len(stock)} distinct items in {len(w.chests)} chests "
+            f"(use --exclude NAME to skip ones you do not want to spend)"
+        )
+    else:
+        print("no --world: planning from purchases only", file=sys.stderr)
+    kinds = frozenset(a.kinds.split(",")) if a.kinds else frozenset(KINDS)
+    kinds |= {SELL}
+    cons = Constraints(
+        kinds=kinds,
+        include_items=_items(ds, a.include) if a.include else None,
+        exclude_items=_items(ds, a.exclude_item),
+    )
+    known = frozenset(stock) | frozenset(_farm_seed(ds, a.farm))
+    g = build_graph(ds, world, npcs, cons, known_items=known)
+    params = PlanParams(
+        top=a.top,
+        wallet=a.wallet,
+        kills=a.farm or 0,
+        expert=a.expert,
+        exclude_items=frozenset(),  # already removed from stock above
+        must_use=_items(ds, a.must_use),
+        min_profit=a.min_profit,
+        show_liquidation=a.show_liquidation,
+        time_limit=a.time_limit,
+    )
+    rep = plan(g, stock, params)
+    if a.json:
+        print(
+            json.dumps(
+                {
+                    "world": w.name if a.world else None,
+                    "liquidation": rep.liquidation,
+                    "stats": vars(rep.stats),
+                    "results": [
+                        {
+                            "profit": r.profit,
+                            "capital": r.capital,
+                            "kills": r.kills,
+                            "approx": r.approx,
+                            "places": r.places,
+                            "moves": [
+                                {"kind": m.kind, "batches": n, "text": g.describe(m, n)}
+                                for m, n in r.moves
+                            ],
+                            "residue": [
+                                {"id": i, "name": g.name(i), "count": c}
+                                for i, c in sorted(r.residue.items())
+                            ],
+                        }
+                        for r in rep.results
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 0
+    print(
+        f"{len(stock)} stock items | floor (sell everything): {rep.liquidation:,}c | "
+        f"{rep.solves} LPs in {rep.elapsed:.1f}s" + ("" if rep.complete else "  [stopped early]")
+    )
+    if not rep.results:
+        print("no plan improves on the liquidation floor (try --farm for farming recipes)")
+    for k, r in enumerate(rep.results, 1):
+        print(f"\n#{k} {r.summary(g)}")
+    return 0
+
+
+def _farm_seed(ds, kills: int | None):
+    """Items farm sources can provide, for reachability seeding (rough: unconditioned EV)."""
+    if not kills:
+        return []
+    out = set()
+    for npc, lst in ds.drops:
+        if npc <= 0:
+            continue
+        for d in lst:
+            if d.conditions in ((), ("NotExpert",), ("IsExpert",)):
+                out.add(d.item)
+    return sorted(out)
+
+
 def cmd_search(a: argparse.Namespace) -> int:
     ds = load_dataset(a.dataset)
     happiness, npc_zones = _npcs(ds, a.npc, a.all_npcs)
@@ -179,7 +278,7 @@ def cmd_search(a: argparse.Namespace) -> int:
     cons = Constraints(
         kinds=kinds,
         include_items=_items(ds, a.include) if a.include else None,
-        exclude_items=_items(ds, a.exclude),
+        exclude_items=_items(ds, a.exclude_item),
     )
     g = build_graph(ds, world, npcs, cons)
     params = SearchParams(
@@ -189,7 +288,7 @@ def cmd_search(a: argparse.Namespace) -> int:
         allow_loss=a.allow_loss,
         must_use=_items(ds, a.must_use),
         start_items=_items(ds, a.start) if a.start else None,
-        wallet=a.wallet,
+        wallet=a.budget,
         max_places=a.max_places,
         time_limit=a.time_limit,
     )
@@ -380,6 +479,30 @@ def cmd_serve(a: argparse.Namespace) -> int:
     return 0
 
 
+def _add_world_args(p: argparse.ArgumentParser) -> None:
+    """NPC / world-setup flags shared by `search` and `plan`."""
+    p.add_argument(
+        "--npc",
+        action="append",
+        metavar="NAME[=ADJ][@ZONES]",
+        help="present NPC, its happiness price adjustment (0.75 happiest..1.5) and the biome "
+        "zones it lives in, e.g. Merchant=0.9@snow or Merchant@any (try every biome)",
+    )
+    p.add_argument(
+        "--travel-stock", action="append", help="item the Travelling Merchant sells today"
+    )
+    p.add_argument(
+        "--all-npcs", metavar="ADJ[@ZONES]", help="all shop NPCs present at ADJ, e.g. 0.75@any"
+    )
+    p.add_argument("--discount", action="store_true", help="Discount Card equipped")
+    p.add_argument("--flag", action="append", help="world flag, e.g. hardmode, downedMoonLord")
+    p.add_argument("--no-shimmer", action="store_true")
+    p.add_argument("--kinds", help="comma list from buy,craft,shimmer (selling is always implicit)")
+    p.add_argument("--include", action="append", help="only use these items (repeatable)")
+    p.add_argument("--exclude-item", action="append", help="never use these items")
+    p.add_argument("--must-use", action="append", help="the plan must involve these items")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="shimcoins", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -412,25 +535,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("search", help="find profitable move sequences")
     s.add_argument("dataset", help="JSON dump, db.sqlite or data/<version>/")
-    s.add_argument(
-        "--npc",
-        action="append",
-        metavar="NAME[=ADJ][@ZONES]",
-        help="present NPC, its happiness price adjustment (0.75 happiest..1.5) and the biome "
-        "zones it lives in, e.g. Merchant=0.9@snow or Merchant@any (try every biome)",
-    )
-    s.add_argument(
-        "--travel-stock", action="append", help="item the Travelling Merchant sells today"
-    )
-    s.add_argument(
-        "--all-npcs",
-        metavar="ADJ[@ZONES]",
-        help="all shop NPCs present at ADJ, optionally living somewhere (e.g. 0.75@any)",
-    )
-    s.add_argument("--discount", action="store_true", help="Discount Card equipped")
-    s.add_argument("--flag", action="append", help="world flag, e.g. hardmode, downedMoonLord")
-    s.add_argument("--no-shimmer", action="store_true")
-    s.add_argument("--top", type=int, default=10, help="number of recipes to report")
+    _add_world_args(s)
+    s.add_argument("--top", type=int, default=10)
     s.add_argument(
         "--overhead",
         type=float,
@@ -439,25 +545,41 @@ def build_parser() -> argparse.ArgumentParser:
         help="fixed per-loop effort c in the score ln(1+gain)/(L+c); 0 = pure compounding",
     )
     s.add_argument(
-        "--max-places", type=int, help="drop recipes whose tour visits more than this many places"
+        "--max-places", type=int, help="drop recipes whose tour visits more than this places"
     )
     s.add_argument("--min-gain", type=float, default=0.0)
     s.add_argument("--allow-loss", action="store_true", help="also report the least-bad recipes")
-    s.add_argument("--kinds", help="comma list from buy,craft,shimmer (selling is always implicit)")
-    s.add_argument("--include", action="append", help="only use these items (repeatable)")
-    s.add_argument("--exclude", action="append", help="never use these items")
-    s.add_argument("--must-use", action="append", help="recipe must involve these items")
     s.add_argument("--start", action="append", help="only buy these items")
-    s.add_argument(
-        "--wallet",
-        type=parse_coins,
-        metavar="COINS",
-        help="your wallet, e.g. '50g': recipes needing more are dropped, the rest are shown "
-        "scaled to it (one-shot recipes stay minimal)",
-    )
+    s.add_argument("--budget", type=parse_coins, help="scale plans up to this, e.g. '5p 20g'")
     s.add_argument("--time-limit", type=float, default=30.0)
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_search)
+
+    pl = sub.add_parser(
+        "plan", help="best uses of your world chests (+ optional buying and farming)"
+    )
+    pl.add_argument("dataset", help="JSON dump, db.sqlite or data/<version>/")
+    pl.add_argument("--world", help="a .wld file: every chest's items become your stock")
+    pl.add_argument(
+        "--exclude", action="append", help="stock item NOT to spend (name or id, repeatable)"
+    )
+    pl.add_argument("--top", type=int, default=10)
+    pl.add_argument("--wallet", type=parse_coins, default="0", help="coins to spend on buys")
+    pl.add_argument(
+        "--farm",
+        type=int,
+        metavar="KILLS",
+        help="with farming: also show recipes that need farming (EV per kill)",
+    )
+    pl.add_argument("--expert", action="store_true", help="expert-mode drop tables")
+    pl.add_argument("--min-profit", type=int, default=0, help="hide plans earning less (copper)")
+    pl.add_argument(
+        "--show-liquidation", action="store_true", help="also list 'sell your X' floor plans"
+    )
+    pl.add_argument("--time-limit", type=float, default=30.0)
+    pl.add_argument("--json", action="store_true")
+    _add_world_args(pl)
+    pl.set_defaults(func=cmd_plan)
 
     wp = sub.add_parser("world", help="parse a .wld world: chests, NPCs, metadata")
     wp.add_argument("path", help="path to the .wld file")

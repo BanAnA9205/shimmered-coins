@@ -53,3 +53,30 @@ def test_npc_setup_parses_zones():
     assert setup.zones_of(2) == frozenset({"snow"})
     assert setup.zones_of(3) == "any"
     assert setup.travel_stock == frozenset({5})
+
+
+def test_plan_endpoint_runs(client):
+    """plans craft from the posted stock; empty input is rejected rather than planned."""
+    body = {
+        "dataset": "demo",
+        "stock": {"1": 6, "2": 1, "3": 2},  # Ore, Bar, Gem -> craft the Ring
+        "npcs": {"1": 1.0, "2": 1.0},
+        "flags": ["downedboss"],
+        "top_n": 3,
+    }
+    res = client.post("/api/plan", json=body)
+    assert res.status_code == 200
+    d = res.json()
+    assert d["stats"]["solves"] > 0
+    assert d["results"] and d["results"][0]["profit"] >= 0
+
+    r_bad = client.post("/api/plan", json={"dataset": "demo"})
+    assert r_bad.status_code == 400
+    assert client.post("/api/worlds/detail", json={"path": "?"}).status_code == 404
+
+
+def test_worlds_endpoint_lists_saves_or_empty(client):
+    worlds = client.get("/api/worlds").json()
+    assert isinstance(worlds, list)
+    for w in worlds:
+        assert "path" in w and ("error" in w or "chests" in w)

@@ -29,7 +29,10 @@ pytest
 shimcoins data fetch           # picks a version, confirms, cleans up after itself
 shimcoins data info data/1.4.5.8
 
-# search it
+# plan from a world's chest items (the pivot search; --farm adds EV farming plans)
+shimcoins plan data/1.4.5.8 --world ~/.local/share/Terraria/Worlds/joe.wld --all-npcs 0.75 --top 5
+
+# search the shop economy from scratch
 shimcoins search data/1.4.5.8 --all-npcs 0.75 --flag hardmode --top 5
 
 # the bundled toy world (invented data) works everywhere a dataset does

@@ -27,6 +27,7 @@ class Table:
     price: np.ndarray  # (n_items,) copper per unit when sold (0 = unsellable)
     cols: list[Transform]
     item_index: dict[int, int]
+    plan_used: np.ndarray | None = None  # plan mode: value tied up per batch (normalization)
 
     def revenue(self) -> np.ndarray:
         """Copper per batch of each column: everything it produces, sold (p'N)."""
@@ -48,7 +49,9 @@ def build_table(g: Graph, start_items: frozenset[int] | None = None) -> Table:
         if item in item_index:
             price[item_index[item]] = t.revenue
     cost = np.array([float(t.cost) for t in cols])
-    keep = prune_columns(N, price > 0, np.zeros(len(cols), dtype=bool))
+    keep = prune_columns(
+        N, np.zeros(len(item_index), dtype=bool), price > 0, np.zeros(len(cols), dtype=bool)
+    )
     if not keep.all():
         N = N[:, keep]
         cost = cost[keep]
@@ -82,18 +85,30 @@ def column_matrix(
     return N, is_sell, liquid
 
 
-def prune_columns(N: sp.csc_matrix, base_liquid: np.ndarray, always_keep: np.ndarray) -> np.ndarray:
-    """Keep mask: a column stays when its inputs are reachable from zero-input columns (buys)
-    and its outputs can reach an item with sell value (or the column is in ``always_keep``)."""
+def prune_columns(
+    N: sp.csc_matrix,
+    base_reach: np.ndarray,
+    base_liquid: np.ndarray,
+    always_keep: np.ndarray,
+) -> np.ndarray:
+    """Keep mask: a column stays when its inputs are reachable from zero-input columns
+    (buys) or the ``base_reach`` items (held/farmed items), and its outputs can reach an
+    item with sell value (or the column is in ``always_keep``)."""
     m, n = N.shape
     neg = (N < 0).tocsc()
     pos = (N > 0).tocsc()
     deg = np.diff(neg.indptr)  # distinct consumed items per column
     usable = deg == 0
-    reach = np.zeros(m, dtype=bool)
-    cnt = np.zeros(n, dtype=np.int64)
     neg_t = neg.tocsr()  # item -> columns consuming it
+    reach = base_reach.astype(bool).copy()
+    cnt = np.zeros(n, dtype=np.int64)
+    for i in np.flatnonzero(reach):  # held/farmed items already count as obtained
+        for cc in neg_t.indices[neg_t.indptr[i] : neg_t.indptr[i + 1]]:
+            cnt[cc] += 1
+            if cnt[cc] == deg[cc] and not usable[cc]:
+                usable[cc] = True
     stack = np.flatnonzero(usable).tolist()
+
     while stack:
         c = stack.pop()
         for i in pos.indices[pos.indptr[c] : pos.indptr[c + 1]]:

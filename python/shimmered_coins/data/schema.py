@@ -210,6 +210,9 @@ class Dataset:
             for s in d.get("shimmer", [])
         ]
         npcs = {int(n["id"]): Npc(**n) for n in d.get("npcs", [])}
+        for n in d.get("drop_npcs", []):
+            # droppers (monsters mostly) join the NPC catalog for display; has_shop stays False
+            npcs.setdefault(int(n["id"]), Npc(int(n["id"]), n.get("name", f"npc {n['id']}"), False))
         drops = [
             (
                 int(e["npc"]),

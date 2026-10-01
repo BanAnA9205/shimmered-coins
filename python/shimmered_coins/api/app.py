@@ -21,6 +21,7 @@ from ..model import ANY_ZONE, KINDS, SELL, Constraints, NpcSetup, WorldConfig, b
 from ..model.conditions import flag_groups, zones
 from ..model.graph import Graph, Transform, format_coins
 from ..search import SearchParams, search
+from ..search.plan import farm_sources
 
 DEMO = Path(__file__).resolve().parent.parent / "demo" / "toy_world.json"
 WEB_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
@@ -66,7 +67,22 @@ class NpcIn(BaseModel):
     zones: list[str] | str = []  # biome zones, or "any"
 
 
-class SearchRequest(BaseModel):
+class _WorldSetup(BaseModel):
+    """Fields shared by /api/search and /api/plan."""
+
+    npcs: dict[int, float | NpcIn] = Field(
+        default_factory=dict, description="npc id -> price adjustment, or {adjustment, zones}"
+    )
+    flags: list[str] = []
+    shimmer: bool = True
+    discount: bool = False
+    travel_stock: list[int] = []
+    kinds: list[str] = []
+    time_limit: float = Field(30.0, gt=0, le=MAX_TIME_LIMIT)
+
+
+class SearchRequest(_WorldSetup):
+    dataset: str = "demo"
     dataset: str = "demo"
     flags: list[str] = []
     shimmer: bool = True
@@ -89,6 +105,52 @@ class SearchRequest(BaseModel):
         None, description="copper: drop unaffordable recipes, scale the rest"
     )
     time_limit: float = Field(30.0, gt=0, le=MAX_TIME_LIMIT)
+
+
+class PlanRequest(_WorldSetup):
+    """A plan run: which world's stock to use, plus the same world/NPC setup as search."""
+
+    dataset: str = "demo"
+    world: str | None = Field(None, description="a .wld file path to take stock from")
+    stock: dict[int, int] | None = Field(
+        None, description="item id -> count held (from the chosen world's chests; editable)"
+    )
+    include: list[int] | None = None
+    exclude: list[int] = []
+    must_use: list[int] = []
+    top_n: int = Field(10, ge=1, le=100)
+    wallet: int = Field(0, ge=0, description="copper you are willing to spend on buys")
+    kills: int = Field(0, ge=0, description="with farming: > 0 turns farming columns on")
+    expert: bool = False
+    min_profit: int = Field(0, description="hide plans earning less (copper)")
+    show_liquidation: bool = False
+
+
+def _plan_graph(ds: Dataset, req: PlanRequest, stock: dict[int, int]) -> Graph:
+    """Build the move graph with the plan's known items (held + farm-EV) seeding reach."""
+    probe = build_graph(
+        ds,
+        WorldConfig(flags=frozenset(req.flags), shimmer=req.shimmer),
+        npc_setup(req),  # type: ignore[arg-type]
+        Constraints(
+            kinds=frozenset(list(req.kinds) or list(KINDS)) | {SELL},
+            include_items=frozenset(req.include) if req.include is not None else None,
+            exclude_items=frozenset(req.exclude),
+        ),
+    )
+    farms = farm_sources(probe, False) if req.kills else []
+    known = frozenset(stock) | {i for _, ev in farms for i, _ in ev}
+    return build_graph(
+        ds,
+        WorldConfig(flags=frozenset(req.flags), shimmer=req.shimmer),
+        npc_setup(req),  # type: ignore[arg-type]
+        Constraints(
+            kinds=frozenset(list(req.kinds) or list(KINDS)) | {SELL},
+            include_items=frozenset(req.include) if req.include is not None else None,
+            exclude_items=frozenset(req.exclude),
+        ),
+        known_items=known,
+    )
 
 
 def npc_setup(req: SearchRequest) -> NpcSetup:
@@ -242,6 +304,110 @@ def create_app() -> FastAPI:
         hits = [it for it in ds.items.values() if key in it.name.lower()] if key else []
         hits.sort(key=lambda it: (not it.name.lower().startswith(key), len(it.name), it.name))
         return [{"id": it.id, "name": it.name, "value": it.value} for it in hits[:limit]]
+
+    @app.get("/api/worlds")
+    def list_worlds() -> list[dict]:
+        """The .wld saves in the player's Worlds folder (never any content preview)."""
+        from .worlds import discover_worlds
+
+        return discover_worlds()
+
+    @app.post("/api/plan")
+    def run_plan(req: PlanRequest) -> dict:
+        from ..search.plan import PlanParams, plan, stock_from_world
+
+        ds = get_dataset(req.dataset)
+        stock: dict[int, int] = dict(req.stock or {})
+        if req.world:
+            from ..data.world import parse_world
+
+            stock = stock_from_world(parse_world(req.world))
+        if not stock and req.kills == 0:
+            raise HTTPException(
+                400, "nothing to plan from: pick a world (or enable farming in Settings)"
+            )
+        g = _plan_graph(ds, req, stock)
+        rep = plan(
+            g,
+            stock,
+            PlanParams(
+                top=req.top_n,
+                wallet=req.wallet,
+                kills=req.kills,
+                expert=req.expert,
+                must_use=frozenset(req.must_use),
+                min_profit=req.min_profit,
+                show_liquidation=req.show_liquidation,
+                time_limit=req.time_limit,
+            ),
+        )
+        return {
+            "version": ds.version,
+            "liquidation": rep.liquidation,
+            "stats": {
+                "solves": rep.solves,
+                "loops": len(rep.loops),
+                "elapsed": rep.elapsed,
+                "complete": rep.complete,
+            },
+            "results": [
+                {
+                    "profit": r.profit,
+                    "profit_text": format_coins(r.profit),
+                    "capital": r.capital,
+                    "capital_text": format_coins(r.capital),
+                    "kills": r.kills,
+                    "approx": r.approx,
+                    "places": r.places,
+                    "moves": [_move_json(g, m, n, g.describe(m, n)) for m, n in r.moves],
+                    "residue": [
+                        {"id": i, "name": g.name(i), "count": c}
+                        for i, c in sorted(r.residue.items())
+                    ],
+                }
+                for r in rep.results
+            ],
+        }
+
+    @app.post("/api/worlds/detail")
+    def world_detail(body: dict) -> dict:
+        """Per-item stock of one world (every chest summed) so the plan UI can uncheck items."""
+        from pathlib import Path as _P
+
+        from ..data.world import parse_world
+
+        path = body.get("path")
+        if not path:
+            raise HTTPException(400, "path is required")
+        if not _P(path).is_file():
+            raise HTTPException(404, f"no world file {path}")
+        if not path.endswith(".wld"):
+            raise HTTPException(400, "not a .wld file")
+        ds_id = body.get("dataset", "demo")
+        ds = get_dataset(ds_id)
+        w = parse_world(path)
+        held: dict[int, int] = {}
+        for chest in w.chests:
+            for iid, _prefix, stack in chest.items:
+                held[iid] = held.get(iid, 0) + stack
+        stock = [
+            {
+                "id": iid,
+                "name": ds.items[iid].name if iid in ds.items else f"item {iid}",
+                "count": count,
+            }
+            for iid, count in sorted(held.items(), key=lambda kv: -kv[1])
+        ]
+        return {
+            "name": w.name,
+            "seed": w.seed,
+            "version": w.version,
+            "chests": [
+                {"x": c.x, "y": c.y, "name": c.name, "items": len(c.items)} for c in w.chests
+            ],
+            "npcs": [{"type": n.type, "name": n.name, "homeless": n.homeless} for n in w.npcs],
+            "stock": stock,
+        }
 
     @app.post("/api/search")
     def run_search(req: SearchRequest) -> dict:
