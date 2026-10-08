@@ -659,7 +659,12 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
 
     # _finalize_plan can drop candidates (their integerized batch needs more items than
     # the stock actually holds), so always draw three times the requested top
-    recipes = solver.top_k(params.top * 3, deadline)
+    # (enumeration deadline minus a reserve: on real worlds the partition consumes the
+    # whole budget, and without a reserve the combined plan would never get IP time)
+    reserve = 5.0 if deadline is not None and params.top > 1 else 0.0
+    enum_deadline = None if deadline is None else deadline - reserve
+    recipes = solver.top_k(params.top * 3, enum_deadline)
+    enum_done = enum_deadline is None or time.monotonic() <= enum_deadline
     seller = g.npcs.happiest_npc() if g.npcs is not None else None
 
     results: list[PlanResult] = []
@@ -700,7 +705,9 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
         stock=stock,
         loops=loops,
         solves=solver.solves + loop_ctx.solves,
-        complete=deadline is None or time.monotonic() <= deadline,
+        # the ranking stopped early if it hit the (reserve-adjusted) enumeration deadline,
+        # even when the whole request lands inside the budget
+        complete=enum_done,
         elapsed=elapsed,
     )
 
