@@ -91,4 +91,7 @@ The crafting-assistant search is live: `shimcoins plan <dataset> --world your.wl
 - Tests: `pytest` (97 passing after the Plan-tab ranking fixes; plus 7 more in the
   mono/sprites conda envs, skipped without them); lint `ruff check` + `ruff format --check`.
   The C# extractor builds with the mono env.
+- CI (`.github/workflows/ci.yml`) runs per PR: ruff, pytest on Python 3.11 + 3.13, the
+  mono-backed extractor tests against a mock game assembly, the web build (`npm ci` +
+  `npm run build`), and a CLI smoke pass over the demo dataset (search/plan, text + `--json`).
 - Data never commits: game data, sprites and world saves stay local (`data/`, `web/public/`).
