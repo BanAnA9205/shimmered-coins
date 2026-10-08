@@ -1,22 +1,75 @@
 name: CI
+
 on:
   push:
+    branches: [main]
   pull_request:
+
+# a new push to the same PR cancels the stale run
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  python:
+  lint:
+    name: Ruff (lint + format)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mono-mcs mono-runtime
-      - run: pip install -e ".[dev]"
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install "ruff>=0.4"
       - run: ruff check python tests
       - run: ruff format --check python tests
-      - run: pytest -q
-  web:
+
+  tests:
+    name: pytest (py${{ matrix.python }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      # extractor (mono) and sprite (game install) tests skip here; extractor has its own job
+      - run: pytest -q
+
+  extractor:
+    name: C# extractor (mono + mock game)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install mono
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mono-mcs mono-runtime
+      - run: pip install -e ".[dev]"
+      # compiles the extractor with mcs, runs it against a mock Terraria assembly,
+      # extracts, builds a dataset and asserts its contents
+      - run: pytest -q tests/test_extractor.py
+
+  web:
+    name: Web build (tsc + vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
@@ -25,5 +78,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  cli-smoke:
+    name: CLI smoke (demo dataset)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # plain user install, no dev extras: the console script is the product surface
+      - run: pip install -e .
+      - name: search (text output)
+        run: shimcoins search python/shimmered_coins/demo/toy_world.json --all-npcs 0.75@any --top 3 --time-limit 10 | grep -q "gain"
+      - name: search --json has results
+        run: |
+          shimcoins search python/shimmered_coins/demo/toy_world.json --all-npcs 0.75@any --top 3 --time-limit 10 --json > search.json
+          python - <<'PY'
+          import json
+          j = json.load(open("search.json"))
+          assert j["results"], "search returned no results"
+          assert j["results"][0]["gain"] > 0, j["results"][0]
+          PY
+      - name: plan from purchases --json produces plans
+        run: |
+          shimcoins plan python/shimmered_coins/demo/toy_world.json --all-npcs 0.75@any --wallet 5p --top 3 --time-limit 30 --json > plan.json
+          python - <<'PY'
+          import json
+          j = json.load(open("plan.json"))
+          assert j["results"], "plan returned no results"
+          assert j["results"][0]["profit"] > 0, j["results"][0]
+          PY
