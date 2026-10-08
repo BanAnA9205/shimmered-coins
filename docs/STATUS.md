@@ -28,8 +28,15 @@ This file is the "where are we" summary; [`PLAN.md`](PLAN.md) is the original MV
 
 ## In flight
 
-- **PR #8** (`feat/engine-sprites-world`): the pivot plan engine (`shimcoins plan` + the UI's
-  Plan tab), plus two audit passes. Branch names are `feat/...` from now on.
+- **PR #10** (`feat/lawler-polished-key`): top-K ranking fixes found while verifying the Plan
+  tab on real saves —
+  - Lawler partitions split on the *polished* key (the audit's raw-key split flooded the heap
+    with EPS/noise regions; ~5x pop-speedup and full diversity on joe.wld);
+  - the combined plan now gets the last 5 s of the budget (before, enumeration always ate it
+    all and the "all of these together" card never appeared outside toy tests);
+  - datasets extracted before NPC drop tables (1.4.4.9) load with empty drop lists instead of
+    500-ing every endpoint;
+  - same-profit plans on the same inputs (value-neutral tail moves) dedup to one card.
 - Second audit fixed:
   - plans ignored how many items you hold and how much you can spend; now checked and scaled;
   - top-K could skip recipes whose moves contain another recipe's moves (ALGORITHM.md 3, 4.3);
@@ -81,6 +88,7 @@ The crafting-assistant search is live: `shimcoins plan <dataset> --world your.wl
 ## Conventions
 
 - Branches: `feat/<thing>`; PRs into `main`; PRs get squashed after review.
-- Tests: `pytest` (100 passing after the combined plan, incl. mono-backed extractor tests);
-  lint `ruff check` + `ruff format --check`. The C# extractor builds with the mono env.
+- Tests: `pytest` (97 passing after the Plan-tab ranking fixes; plus 7 more in the
+  mono/sprites conda envs, skipped without them); lint `ruff check` + `ruff format --check`.
+  The C# extractor builds with the mono env.
 - Data never commits: game data, sprites and world saves stay local (`data/`, `web/public/`).
