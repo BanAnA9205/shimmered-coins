@@ -340,3 +340,13 @@ def test_zero_profit_tail_moves_are_one_plan():
     # the same plan with the value-neutral Gem -> Dust tail (same leftover value) must
     # NOT appear as a second 400-profit card
     assert [r.profit for r in rep.results] == [400]
+
+
+def test_short_time_limits_still_plan():
+    """Regression: the combined-plan reserve used to be a flat 5s, so a 5s run spent its
+    whole budget in the reserve and enumerated nothing. Short runs must keep most of the
+    budget for ranking (and whether combine ran is irrelevant at this size)."""
+    ds = plan_dataset()  # Ring plan: capital 17.25g per copy
+    g = _g(ds, stock={2: 1, 3: 2})
+    rep = plan(g, {2: 1, 3: 2}, PlanParams(top=3, wallet=10_000, time_limit=4.0))
+    assert rep.results and rep.results[0].profit > 0
