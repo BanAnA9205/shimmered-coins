@@ -668,6 +668,7 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
     seller = g.npcs.happiest_npc() if g.npcs is not None else None
 
     results: list[PlanResult] = []
+    seen_outcomes: set = set()
     for r in recipes:
         kinds = {table.cols[j].kind for j in r.support()}
         if kinds == {STOCK} and not params.show_liquidation:
@@ -683,6 +684,17 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
             continue
         if res.profit < params.min_profit:
             continue
+        # the LP lists value-neutral tail moves (shimmer Bottled Water -> Bottle) as
+        # separate recipes; to the player they are one plan
+        outcome = (
+            res.profit,
+            res.capital,
+            res.kills,
+            frozenset((t.ref, n) for t, n in res.moves if t.kind in (BUY, STOCK, FARM)),
+        )
+        if outcome in seen_outcomes:
+            continue
+        seen_outcomes.add(outcome)
         results.append(res)
 
     # the partition enumerates candidates by gain; the page shows the most profitable
