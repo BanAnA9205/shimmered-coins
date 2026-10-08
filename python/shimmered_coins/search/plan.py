@@ -657,11 +657,18 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
             if plan_col is not None:
                 solver.ban({plan_col})
 
-    filters = params.min_profit > 0 or params.must_use or not params.show_liquidation
-    recipes = solver.top_k(params.top * 3 if filters else params.top, deadline)
+    # _finalize_plan can drop candidates (their integerized batch needs more items than
+    # the stock actually holds), so always draw three times the requested top
+    # (enumeration deadline minus a reserve: on real worlds the partition consumes the
+    # whole budget, and without a reserve the combined plan would never get IP time)
+    reserve = 5.0 if deadline is not None and params.top > 1 else 0.0
+    enum_deadline = None if deadline is None else deadline - reserve
+    recipes = solver.top_k(params.top * 3, enum_deadline)
+    enum_done = enum_deadline is None or time.monotonic() <= enum_deadline
     seller = g.npcs.happiest_npc() if g.npcs is not None else None
 
     results: list[PlanResult] = []
+    seen_outcomes: set = set()
     for r in recipes:
         kinds = {table.cols[j].kind for j in r.support()}
         if kinds == {STOCK} and not params.show_liquidation:
@@ -677,6 +684,17 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
             continue
         if res.profit < params.min_profit:
             continue
+        # the LP lists value-neutral tail moves (shimmer Bottled Water -> Bottle) as
+        # separate recipes; to the player they are one plan
+        outcome = (
+            res.profit,
+            res.capital,
+            res.kills,
+            frozenset((t.ref, n) for t, n in res.moves if t.kind in (BUY, STOCK, FARM)),
+        )
+        if outcome in seen_outcomes:
+            continue
+        seen_outcomes.add(outcome)
         results.append(res)
 
     # the partition enumerates candidates by gain; the page shows the most profitable
@@ -699,7 +717,9 @@ def plan(g: Graph, stock: dict[int, int], params: PlanParams = PlanParams()) -> 
         stock=stock,
         loops=loops,
         solves=solver.solves + loop_ctx.solves,
-        complete=deadline is None or time.monotonic() <= deadline,
+        # the ranking stopped early if it hit the (reserve-adjusted) enumeration deadline,
+        # even when the whole request lands inside the budget
+        complete=enum_done,
         elapsed=elapsed,
     )
 

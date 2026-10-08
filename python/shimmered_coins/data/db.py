@@ -215,6 +215,11 @@ def load(path: str | Path) -> Dataset:
 
 
 def _drops_by_npc(con: sqlite3.Connection):
+    # datasets built before farm EVs existed have no npc_drops table (schema was still 1)
+    if not con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='npc_drops'"
+    ).fetchone():
+        return
     current, rows = None, []
     for npc, item, rate, mn, mx, conds in con.execute(
         "SELECT npc, item, rate, min, max, conditions FROM npc_drops ORDER BY npc, item"

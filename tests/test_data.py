@@ -25,6 +25,21 @@ def test_sqlite_roundtrip(toy, tmp_path):
     assert load_dataset(path.parent).version == "toy-1"
 
 
+def test_sqlite_without_drops_table_loads(toy, tmp_path):
+    """Datasets extracted before farm EVs (npc_drops added later, schema stayed 1) must
+    still load -- farming columns just don't exist for them."""
+    path = tmp_path / "toy" / "db.sqlite"
+    dbmod.save(toy, path)
+    import sqlite3
+
+    con = sqlite3.connect(path)
+    con.execute("DROP TABLE npc_drops")
+    con.commit()
+    con.close()
+    loaded = load_dataset(path)
+    assert loaded.drops == []
+
+
 def test_overrides(toy):
     ring = toy.item_by_name("Ring").id
     kit = toy.item_by_name("Kit").id

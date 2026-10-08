@@ -310,3 +310,33 @@ def test_combined_plan_refuses_an_unbounded_cycle():
     table = build_plan_table(g, {1: 1}, [], 0)
     every_move = tuple(range(len(table.cols)))
     assert combine(g, table, [every_move], {1: 1}, PlanParams(wallet=0), None, 2.0) is None
+
+
+def test_zero_profit_tail_moves_are_one_plan():
+    """Equal-profit plans on the same inputs are one outcome. Value-neutral tail moves
+    (shimmer Gem -> Dust, both worth the same) used to make the UI list one plan three
+    times; the results dedup now keys on profit + real inputs."""
+    ds = Dataset.from_dict(
+        {
+            "version": "tail-1",
+            "items": [
+                {"id": 1, "name": "Potion", "value": 100},
+                {"id": 2, "name": "Gem", "value": 500},
+                {"id": 3, "name": "Dust", "value": 500},
+            ],
+            "recipes": [],
+            "shops": [{"npc": 1, "item": 1}],
+            "shimmer": [
+                {"kind": "transmute", "item": 1, "count": 1, "outputs": [[2, 1]]},
+                {"kind": "transmute", "item": 2, "count": 1, "outputs": [[3, 1]]},
+            ],
+            "npcs": [{"id": 1, "name": "Merchant"}],
+            "npc_drops": [],
+        }
+    )
+    g = _g(ds, stock={1: 4})
+    rep = plan(g, {1: 4}, PlanParams(top=5, wallet=0))
+    # take 4 Potions, shimmer to Gems: leftover 4 Gems at 500 = profit 4 * 100 = 400.
+    # the same plan with the value-neutral Gem -> Dust tail (same leftover value) must
+    # NOT appear as a second 400-profit card
+    assert [r.profit for r in rep.results] == [400]
