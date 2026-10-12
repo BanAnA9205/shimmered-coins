@@ -17,3 +17,6 @@ node_modules/
 /web/dist/
 *.tsbuildinfo
 /build/
+
+# extractor build output (mcs) stays local like the datasets
+extractor/bin/

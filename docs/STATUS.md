@@ -87,7 +87,7 @@ The crafting-assistant search is live: `shimcoins plan <dataset> --world your.wl
 
 ## Conventions
 
-- Branches: `feat/<thing>`; PRs into `main`; PRs get squashed after review.
+- Commits go straight to `main` (review-era PRs were squashed; CI on push is the guard now).
 - Tests: `pytest` (97 passing after the Plan-tab ranking fixes; plus 7 more in the
   mono/sprites conda envs, skipped without them); lint `ruff check` + `ruff format --check`.
   The C# extractor builds with the mono env.
