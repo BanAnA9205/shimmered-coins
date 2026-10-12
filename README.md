@@ -1,5 +1,5 @@
 # shimmered-coins
-an engine for searching (possibly constrained) optimal coin-producing loops in terraria using shimmer mechanic 
+an engine for searching (possibly constrained) optimal coin-producing loops in terraria using shimmer mechanic — now also a crafting assistant: it reads your world save and finds the best uses for what you own.
 
 # Inspiration
 https://www.youtube.com/watch?v=Bp3ih9SbIGE
@@ -9,15 +9,20 @@ With the introduction of the Shimmering mechanic in Terraria, many material loop
 
 # Status
 
-Early MVP, now a crafting assistant in the making. **[`docs/STATUS.md`](docs/STATUS.md) is the
-where-are-we summary**; the roadmap is in [`docs/PLAN.md`](docs/PLAN.md) and the engine design
-in [`docs/ALGORITHM.md`](docs/ALGORITHM.md).
+The pivot search has shipped: `shimcoins plan` reads your world save and tells you the best
+uses of what's in your chests, with optional buying and farming on top.
+**[`docs/STATUS.md`](docs/STATUS.md) is the where-are-we summary**; the roadmap is in
+[`docs/PLAN.md`](docs/PLAN.md) and the engine design in [`docs/ALGORITHM.md`](docs/ALGORITHM.md).
 
 - [x] Dataset schema, SQLite storage, curation overrides, version diff ([`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md))
 - [x] Move graph: buy / sell / craft / shimmer, with NPC happiness pricing and world conditions
 - [x] Extractor for real game data (reads `TerrariaServer.exe`), see [`extractor/README.md`](extractor/README.md). `shimcoins data fetch` downloads a server build and runs it. Verified against a real 1.4.5.8 extraction: `data/1.4.5.8/db.sqlite`.
-- [x] Web UI (local, Terraria-style): `shimcoins serve`
+- [x] NPC drop tables via the game's own `ReportDroprates` API (the farming-EV engine's input)
+- [x] World save parsing: `shimcoins world <file.wld>` reads chests and town NPC homes
 - [x] Search engine, recipe-based ([`docs/ALGORITHM.md`](docs/ALGORITHM.md)): HiGHS LPs over the item × move table find atomic recipes (with free-loop detection and Lawler top-K); phase 2 orders each into a tour and ranks by growth per trip. Works on real data.
+- [x] Plan engine (the pivot search): every chest item becomes a bounded stock column, shops are bounded by `--wallet`, farming is per-kill expected value; one LP ranks the plans, and an "all of these together" integer program runs the found plans side by side against your real limits
+- [x] Web UI (local, Terraria-style) with Search, Plan and Sprites tabs: `shimcoins serve`
+- [x] CI on every PR: ruff, the test suite on Python 3.11/3.13, mono extractor tests, the web build and a CLI smoke pass over the demo dataset
 
 # Quick start
 
@@ -29,8 +34,9 @@ pytest
 shimcoins data fetch           # picks a version, confirms, cleans up after itself
 shimcoins data info data/1.4.5.8
 
-# plan from a world's chest items (the pivot search; --farm adds EV farming plans)
-shimcoins plan data/1.4.5.8 --world ~/.local/share/Terraria/Worlds/joe.wld --all-npcs 0.75 --top 5
+# plan from a world's chest items (the pivot search; --wallet adds buys, --farm adds EV
+# farming plans from the NPC drop tables; an "all of these together" plan sits above the list)
+shimcoins plan data/1.4.5.8 --world ~/.local/share/Terraria/Worlds/joe.wld --all-npcs 0.75 --wallet 50g --farm 500 --top 5
 
 # search the shop economy from scratch
 shimcoins search data/1.4.5.8 --all-npcs 0.75 --flag hardmode --top 5
@@ -48,6 +54,9 @@ shimcoins serve            # http://127.0.0.1:8765, datasets from ./data (plus t
 ```
 
 For UI development, run `npm run dev` inside `web/` while `shimcoins serve` is running. The dev server proxies `/api` to it.
+
+Three tabs: **Search** (economy run from shops), **Plan** (best uses of your world's chest
+items, with the combined all-of-these plan on top), **Sprites** (item art browser).
 
 - **Font:** put a Terraria-style font at `web/public/fonts/terraria.ttf`. It's gitignored and used automatically.
 - **Item sprites:** the UI's **Sprites** tab scans for your Terraria/tModLoader install
